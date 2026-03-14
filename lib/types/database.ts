@@ -1,4 +1,4 @@
-export interface Meal {
+﻿export interface Meal {
     id: string; // uuid
     time: string;
     meal_type?: 'colazione' | 'pranzo' | 'cena' | 'snack';
@@ -36,4 +36,48 @@ export interface DailyLog {
     };
     meals_log: Meal[];
     training_log: TrainingSession[];
+}
+
+export interface Exercise {
+    name: string;
+    sets: number;
+    reps: string | number;
+    notes?: string;
+}
+
+export interface WorkoutDay {
+    day_name: string; // es. "Lunedì"
+    workout_type: string; // es. "Push", "Pull", "Rest"
+    exercises: Exercise[];
+}
+
+export interface UserProfile {
+    _id?: string;
+    userId: string;
+    name: string;
+    personal_info: {
+        age?: number;
+        weight_kg?: number;
+        height_cm?: number;
+        gender?: 'M' | 'F' | 'Other';
+        activity_level?: 'sedentario' | 'leggero' | 'moderato' | 'attivo' | 'molto_attivo';
+    };
+    targets: {
+        daily_calories: number;
+        daily_protein_g: number;
+        daily_carbs_g: number;
+        daily_fats_g: number;
+        daily_water_ml: number;
+    };
+    workout_plan: {
+        split_name: string;
+        description: string;
+        schedule: WorkoutDay[];
+    };
+    diet_rules: {
+        meal_timing: string;
+        preferred_foods: string[];
+        forbidden_foods: string[];
+        custom_notes?: string;
+    };
 }
