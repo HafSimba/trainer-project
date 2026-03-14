@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
-import { Plus, Search, Camera, Droplets, Trash2, Loader2, Home } from "lucide-react";
+import { Plus, Search, Camera, Droplets, Trash2, Loader2, Home, Pencil } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -122,6 +122,67 @@ export default function Diary() {
   
   if (pieData.length === 0) pieData.push({ name: 'Vuoto', value: 1, color: '#e5e7eb' });
 
+  const [editingMeal, setEditingMeal] = useState<any>(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editMacros, setEditMacros] = useState({ calories: 0, carbs_g: 0, proteins_g: 0, fats_g: 0 });
+
+  const startEditing = (m: any) => {
+    setEditingMeal(m);
+    setEditMacros({ 
+      calories: Math.round(m.calories), 
+      carbs_g: Math.round(m.carbs_g), 
+      proteins_g: Math.round(m.proteins_g), 
+      fats_g: Math.round(m.fats_g) 
+    });
+    setIsEditModalOpen(true);
+  };
+
+  const confirmEdit = async () => {
+    if (!editingMeal) return;
+    setIsEditModalOpen(false);
+    setIsLoading(true);
+    try {
+      const updatedMeal = { ...editingMeal, ...editMacros };
+      const today = new Date().toISOString().split('T')[0];
+      await fetch('/api/logs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          userId: PROTOTYPE_USER_ID, 
+          date: today, 
+          action: 'edit_meal', 
+          meal: updatedMeal, 
+          old_meal: editingMeal 
+        })
+      });
+      fetchTodayData();
+    } catch (e) {
+      console.error(e);
+      setIsLoading(false);
+    }
+  };
+
+  const handleDeleteMeal = async (mealToDelete: any) => {
+    setIsLoading(true);
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      await fetch('/api/logs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          userId: PROTOTYPE_USER_ID, 
+          date: today, 
+          action: 'delete_meal', 
+          meal: mealToDelete 
+        })
+      });
+      fetchTodayData();
+    } catch (e) {
+      console.error(e);
+      setIsLoading(false);
+    }
+  };
+
   const renderMealSection = (type: MealType, title: string) => {
     const sectionMeals = meals.filter((m: any) => m.meal_type === type || (!m.meal_type && type === 'colazione'));
     const sectionCals = sectionMeals.reduce((acc: number, m: any) => acc + (m.calories || 0), 0);
@@ -141,7 +202,15 @@ export default function Diary() {
                     <span className="font-medium" style={{textTransform: 'capitalize'}}>{m.name}</span>
                     <span className="text-[10px] text-gray-400">C: {Math.round(m.carbs_g)}g | P: {Math.round(m.proteins_g)}g | G: {Math.round(m.fats_g)}g</span>
                   </div>
-                  <span className="text-gray-600">{Math.round(m.calories)} kcal</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-gray-600 mr-2">{Math.round(m.calories)} kcal</span>
+                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => startEditing(m)}>
+                      <Pencil className="w-3 h-3 text-gray-500" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleDeleteMeal(m)}>
+                      <Trash2 className="w-3 h-3 text-red-500" />
+                    </Button>
+                  </div>
                 </li>
               ))}
             </ul>
@@ -284,6 +353,49 @@ export default function Diary() {
               <div className="flex gap-2 mt-4">
                  <Button variant="outline" onClick={() => setSelectedProduct(null)} className="flex-1">Indietro</Button>
                  <Button onClick={confirmAddingProduct} className="flex-1 bg-green-600 hover:bg-green-700">Conferma</Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+      <Dialog open={isEditModalOpen} onOpenChange={(open) => {
+        setIsEditModalOpen(open);
+        if (!open) setEditingMeal(null);
+      }}>
+        <DialogContent className="sm:max-w-[425px] w-[95vw] rounded-xl">
+          <DialogHeader>
+            <DialogTitle>Modifica Alimento</DialogTitle>
+          </DialogHeader>
+          {editingMeal && (
+            <div className="flex flex-col gap-4 mt-2">
+              <div className="text-center mb-2">
+                <h3 className="font-bold text-lg" style={{textTransform: 'capitalize'}}>{editingMeal.name}</h3>
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <label className="text-sm font-semibold mb-1 block">Calorie (kcal)</label>
+                  <Input type="number" value={editMacros.calories} onChange={(e) => setEditMacros({...editMacros, calories: Number(e.target.value)})} />
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="text-xs font-semibold mb-1 block text-blue-500">Carbo (g)</label>
+                    <Input type="number" value={editMacros.carbs_g} onChange={(e) => setEditMacros({...editMacros, carbs_g: Number(e.target.value)})} />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold mb-1 block text-red-500">Pro (g)</label>
+                    <Input type="number" value={editMacros.proteins_g} onChange={(e) => setEditMacros({...editMacros, proteins_g: Number(e.target.value)})} />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold mb-1 block text-amber-500">Grassi (g)</label>
+                    <Input type="number" value={editMacros.fats_g} onChange={(e) => setEditMacros({...editMacros, fats_g: Number(e.target.value)})} />
+                  </div>
+                </div>
+              </div>
+              <div className="flex gap-2 mt-4">
+                 <Button variant="outline" onClick={() => setIsEditModalOpen(false)} className="flex-1">Annulla</Button>
+                 <Button onClick={confirmEdit} className="flex-1 bg-blue-600 hover:bg-blue-700" disabled={isLoading}>
+                   {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Salva'}
+                 </Button>
               </div>
             </div>
           )}

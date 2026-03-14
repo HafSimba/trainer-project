@@ -5,7 +5,6 @@ import { DailyLog, Meal } from '@/lib/types/database';
 export async function POST(req: Request) {
     try {
         const body = await req.json();
-        // default action to 'add_meal' for backwards compatibility if not provided
         const { userId, date, action = 'add_meal', meal, water_ml } = body;
 
         if (!userId || !date) {
@@ -36,6 +35,41 @@ export async function POST(req: Request) {
                     }
                 },
                 { upsert: true, returnDocument: 'after' }
+            );
+            return NextResponse.json({ success: true, log: updateResult });
+        }
+
+        if (action === 'delete_meal' && meal) {
+            const updateResult = await collection.findOneAndUpdate(
+                { userId, date },
+                {
+                    $pull: { meals_log: { id: meal.id } },
+                    $inc: {
+                        "daily_nutrition_summary.total_calories": -meal.calories,
+                        "daily_nutrition_summary.total_proteins_g": -meal.proteins_g,
+                        "daily_nutrition_summary.total_carbs_g": -meal.carbs_g,
+                        "daily_nutrition_summary.total_fats_g": -meal.fats_g,
+                    }
+                },
+                { returnDocument: 'after' }
+            );
+            return NextResponse.json({ success: true, log: updateResult });
+        }
+
+        if (action === 'edit_meal' && meal && body.old_meal) {
+            const { old_meal } = body;
+            const updateResult = await collection.findOneAndUpdate(
+                { userId, date, "meals_log.id": meal.id },
+                {
+                    $set: { "meals_log.$": meal },
+                    $inc: {
+                        "daily_nutrition_summary.total_calories": meal.calories - old_meal.calories,
+                        "daily_nutrition_summary.total_proteins_g": meal.proteins_g - old_meal.proteins_g,
+                        "daily_nutrition_summary.total_carbs_g": meal.carbs_g - old_meal.carbs_g,
+                        "daily_nutrition_summary.total_fats_g": meal.fats_g - old_meal.fats_g,
+                    }
+                },
+                { returnDocument: 'after' }
             );
             return NextResponse.json({ success: true, log: updateResult });
         }
