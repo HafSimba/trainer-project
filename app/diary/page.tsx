@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
-import { Plus, Search, Camera, Droplets, Trash2, Loader2 } from "lucide-react";
+import { Plus, Search, Camera, Droplets, Trash2, Loader2, Home } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -12,7 +12,7 @@ import { BarcodeScanner } from "@/components/BarcodeScanner";
 import { v4 as uuidv4 } from "uuid";
 
 const PROTOTYPE_USER_ID = "tester-user-123";
-const DAILY_CALORIE_GOAL = 2400; // Mock goal
+const DAILY_CALORIE_GOAL = 2400;
 
 type MealType = 'colazione' | 'pranzo' | 'cena' | 'snack';
 
@@ -21,7 +21,6 @@ export default function Diary() {
   const [isLoading, setIsLoading] = useState(true);
   const [waterGlasses, setWaterGlasses] = useState(0);
 
-  // Add Item Dialog State
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [selectedMealType, setSelectedMealType] = useState<MealType>('colazione');
   const [searchQuery, setSearchQuery] = useState('');
@@ -29,7 +28,6 @@ export default function Diary() {
   const [isSearching, setIsSearching] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   
-  // Selected item payload state for quantity editing
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
   const [servingQty, setServingQty] = useState<number>(100);
 
@@ -37,7 +35,7 @@ export default function Diary() {
     setIsLoading(true);
     try {
       const today = new Date().toISOString().split('T')[0];
-      const res = await fetch(\/api/logs?userId=\&date=\\);
+      const res = await fetch('/api/logs?userId=' + PROTOTYPE_USER_ID + '&date=' + today);
       const data = await res.json();
       if (data && data.daily_nutrition_summary) {
         setLog(data);
@@ -46,7 +44,7 @@ export default function Diary() {
         setLog({ meals_log: [], daily_nutrition_summary: { total_calories: 0, total_proteins_g: 0, total_carbs_g: 0, total_fats_g: 0, water_intake_ml: 0 } });
       }
     } catch (e) {
-      console.error("Error", e);
+      console.error(e);
     }
     setIsLoading(false);
   };
@@ -60,7 +58,7 @@ export default function Diary() {
     setIsSearching(true);
     setShowScanner(false);
     try {
-      const res = await fetch(\https://world.openfoodfacts.org/cgi/search.pl?search_terms=\&search_simple=1&action=process&json=1&page_size=10\);
+      const res = await fetch('https://world.openfoodfacts.org/cgi/search.pl?search_terms=' + searchQuery + '&search_simple=1&action=process&json=1&page_size=10');
       const data = await res.json();
       setSearchResults(data.products || []);
     } catch (e) {
@@ -100,7 +98,6 @@ export default function Diary() {
 
     setIsAddDialogOpen(false);
     
-    // Save to DB
     try {
       const today = new Date().toISOString().split('T')[0];
       await fetch('/api/logs', {
@@ -114,7 +111,6 @@ export default function Diary() {
     }
   };
 
-  // Aggregation
   const summary = log?.daily_nutrition_summary || { total_calories: 0, total_proteins_g: 0, total_carbs_g: 0, total_fats_g: 0 };
   const meals = log?.meals_log || [];
 
@@ -164,7 +160,6 @@ export default function Diary() {
     <main className="flex-1 p-4 flex flex-col gap-4 pt-8 pb-24 overflow-y-auto">
       <h1 className="text-2xl font-bold text-gray-900">Diario Alimentare</h1>
       
-      {/* Top Chart Section */}
       <Card className="shadow-sm border-none bg-white">
          <CardContent className="p-4 flex gap-4 items-center">
             <div className="w-1/3 relative h-28">
@@ -172,7 +167,7 @@ export default function Diary() {
                   <PieChart>
                     <Pie data={pieData} dataKey="value" innerRadius={25} outerRadius={40} paddingAngle={2}>
                       {pieData.map((entry, index) => (
-                        <Cell key={\cell-\\} fill={entry.color} />
+                        <Cell key={'cell-' + index} fill={entry.color} />
                       ))}
                     </Pie>
                   </PieChart>
@@ -199,7 +194,6 @@ export default function Diary() {
          </CardContent>
       </Card>
 
-      {/* Water Counter */}
       <Card className="shadow-sm border-none bg-blue-50/50">
          <CardContent className="p-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -218,7 +212,6 @@ export default function Diary() {
          </CardContent>
       </Card>
 
-      {/* Meal Sections */}
       <div className="mt-2">
         {renderMealSection('colazione', 'Colazione')}
         {renderMealSection('pranzo', 'Pranzo')}
@@ -226,9 +219,8 @@ export default function Diary() {
         {renderMealSection('snack', 'Snacks')}
       </div>
 
-      {/* Adding Food Dialog */}
       <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-        <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto w-11/12 rounded-xl">
           <DialogHeader>
             <DialogTitle style={{textTransform:'capitalize'}}>Aggiungi a {selectedMealType}</DialogTitle>
           </DialogHeader>
@@ -237,7 +229,7 @@ export default function Diary() {
             <div className="flex flex-col gap-4 mt-2">
               <div className="flex gap-2">
                 <Input 
-                  placeholder="Cerca alimento (es: Mela)" 
+                  placeholder="Cerca alimento..." 
                   value={searchQuery} 
                   onChange={e => setSearchQuery(e.target.value)} 
                   onKeyDown={e => e.key === 'Enter' && handleSearch()}
@@ -264,7 +256,7 @@ export default function Diary() {
                         <p className="font-medium text-sm line-clamp-1">{item.product_name}</p>
                         <p className="text-xs text-gray-500">{item.brands}</p>
                       </div>
-                      <span className="text-xs font-semibold bg-gray-100 px-2 py-1 rounded">
+                      <span className="text-xs font-semibold bg-gray-100 px-2 py-1 rounded w-fit text-nowrap ml-2 shrink-0">
                         {Math.round(item.nutriments?.energy_kcal_100g || 0)} kcal/100g
                       </span>
                     </CardContent>
@@ -291,7 +283,7 @@ export default function Diary() {
 
               <div className="flex gap-2 mt-4">
                  <Button variant="outline" onClick={() => setSelectedProduct(null)} className="flex-1">Indietro</Button>
-                 <Button onClick={confirmAddingProduct} className="flex-1 bg-green-600 hover:bg-green-700">Conferma {selectedMealType}</Button>
+                 <Button onClick={confirmAddingProduct} className="flex-1 bg-green-600 hover:bg-green-700">Conferma</Button>
               </div>
             </div>
           )}
