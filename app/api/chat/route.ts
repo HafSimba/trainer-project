@@ -1,48 +1,86 @@
-import { NextResponse } from 'next/server';
-import OpenAI from 'openai';
+import { OpenAI } from "openai";
+import clientPromise from "@/lib/mongodb";
 
-// Inizializza il client per reindirizzare il traffico sul PC locale tramite il tunnel Cloudflare.
-// Per rispettare Zero-Trust, iniettiamo anche gli header CF Access richiesti.
-const aiClient = new OpenAI({
+export const revalidate = 0; // Force Next.js not to cache this API route. Very important for Chat and DB.
+export const fetchCache = 'force-no-store';
+
+const client = new OpenAI({
     baseURL: process.env.TUNNEL_CLOUDFLARED,
     apiKey: "not-needed",
     defaultHeaders: {
-        "CF-Access-Client-Id": process.env.CF_ACCESS_CLIENT_ID || "",
-        "CF-Access-Client-Secret": process.env.CF_ACCESS_CLIENT_SECRET || ""
+        "CF-Access-Client-Id": process.env.CF_CLIENT_ID || "",
+        "CF-Access-Client-Secret": process.env.CF_CLIENT_SECRET || "",
     }
 });
 
+const PROTOTYPE_USER_ID = "tester-user-123";
+
 export async function POST(req: Request) {
     try {
-        const body = await req.json();
-        const { messages } = body;
+        const { messages } = await req.json();
 
-        if (!messages || !Array.isArray(messages)) {
-            return NextResponse.json({ error: 'Formato messaggi non valido' }, { status: 400 });
+        let userContextStr = "Nessun dato nutrizionale in memoria al momento.";
+        try {
+            const today = new Date().toISOString().split('T')[0];
+            const mongoClient = await clientPromise;
+            const db = mongoClient.db("trainer_db");
+            const collection = db.collection("daily_logs");
+            
+            const log = await collection.findOne({ userId: PROTOTYPE_USER_ID, date: today });
+            if (log && log.daily_nutrition_summary) {
+                userContextStr = 'Oggi l utente ha consumato: ' + Math.round(log.daily_nutrition_summary.total_calories || 0) + ' kcal. ';
+                if (log.meals_log && log.meals_log.length > 0) {
+                    userContextStr += 'Ultimi pasti salvati: ';
+                    log.meals_log.forEach((m: any) => {
+                        userContextStr += m.name + ' (' + m.calories + ' kcal), ';
+                    });
+                } else {
+                    userContextStr += "Nessun pasto registrato oggi. ";
+                }
+            } else {
+                 userContextStr = "L'utente non ha registrato pasti. Ricordagli di aggiungere i pasti alla dashboard se fa domande o si aspetta che tu li sappia.";
+            }
+        } catch (e) {
+            console.error("DB Fetch Error in Chat Route:", e);
         }
 
-        // Aggiungo un system prompt per istruire il modello a comportarsi da personal trainer e nutrizionista
-        const systemPrompt = {
-            role: 'system',
-            content: 'Sei TrAIner, il tuo personal trainer e nutrizionista virtuale. Rispondi in italiano. Sii conciso, motivante e professionale.',
+        console.log('Sending Context:', userContextStr);
+        const systemMessage = {
+             role: "system",
+             content: "Sei TrAIner, il personal trainer e nutrizionista AI dell'utente. Rispondi in modo conciso in italiano. CONTESTO UTENTE OGGI (" + new Date().toISOString().split('T')[0] + "): " + userContextStr
         };
 
-        // Chiama il completamento di LMStudio locale passando la storia della chat
-        const response = await aiClient.chat.completions.create({
-            model: 'qwen2.5-vl-7b-instruct',
-            max_tokens: 1500,
+        const response = await client.chat.completions.create({
+            model: "qwen2.5-vl-7b-instruct",
+            messages: [systemMessage, ...messages],
+            stream: true,
         });
 
-        // Estrai il contenuto generato o prevedi un fallback sicuro in caso di errori strutturali
-        const replyContent = response.choices[0]?.message?.content || "Scusa, non sono riuscito a elaborare una risposta.";
+        const stream = new ReadableStream({
+            async start(controller) {
+                for await (const chunk of response) {
+                    const text = chunk.choices[0]?.delta?.content || "";
+                    if (text) {
+                        controller.enqueue(text);
+                    }
+                }
+                controller.close();
+            },
+        });
 
-        return NextResponse.json({ content: replyContent });
+        return new Response(stream, {
+            headers: {
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+            },
+        });
 
-    } catch (error: any) {
-        console.error("Errore API Chat TrAIner:", error);
-        return NextResponse.json(
-            { error: "Errore durante la connessione all'agente AI. Verifica che LMStudio e il tunnel Cloudflare siano operativi." },
-            { status: 500 }
-        );
+    } catch (error) {
+        console.error("AI API Error:", error);
+        return new Response(JSON.stringify({ error: "Errore di connessione al modello AI." }), { status: 500 });
     }
 }
+
+
+
