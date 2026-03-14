@@ -29,9 +29,7 @@ export async function POST(req: Request) {
 
         // Chiama il completamento di LMStudio locale passando la storia della chat
         const response = await aiClient.chat.completions.create({
-            model: 'gemma-3-4b-it',
-            messages: [systemPrompt, ...messages.map((m: any) => ({ role: m.role, content: m.content }))],
-            temperature: 0.7,
+            model: 'qwen2.5-vl-7b-instruct',
             max_tokens: 1500,
         });
 
