@@ -90,7 +90,7 @@ export default function Diary() {
       time: new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }),
       meal_type: selectedMealType,
       name: selectedProduct.product_name || 'Prodotto Variato',
-      calories: ((selectedProduct.nutriments?.energy_kcal_100g || 0) * ratio),
+      calories: (((selectedProduct.nutriments?.['energy-kcal_100g'] || selectedProduct.nutriments?.['energy-kcal'] || (selectedProduct.nutriments?.energy_100g ? selectedProduct.nutriments.energy_100g / 4.184 : 0)) || 0) * ratio),
       proteins_g: ((selectedProduct.nutriments?.proteins_100g || 0) * ratio),
       carbs_g: ((selectedProduct.nutriments?.carbohydrates_100g || 0) * ratio),
       fats_g: ((selectedProduct.nutriments?.fat_100g || 0) * ratio)
@@ -257,7 +257,7 @@ export default function Diary() {
                         <p className="text-xs text-gray-500">{item.brands}</p>
                       </div>
                       <span className="text-xs font-semibold bg-gray-100 px-2 py-1 rounded w-fit text-nowrap ml-2 shrink-0">
-                        {Math.round(item.nutriments?.energy_kcal_100g || 0)} kcal/100g
+                        {Math.round((item.nutriments?.['energy-kcal_100g'] || item.nutriments?.['energy-kcal'] || (item.nutriments?.energy_100g ? item.nutriments.energy_100g / 4.184 : 0)) || 0)} kcal/100g
                       </span>
                     </CardContent>
                   </Card>
@@ -268,7 +268,7 @@ export default function Diary() {
             <div className="flex flex-col gap-4 mt-4">
               <div className="text-center mb-2">
                  <h3 className="font-bold text-lg">{selectedProduct.product_name}</h3>
-                 <p className="text-sm text-gray-500 mb-4">{Math.round(selectedProduct.nutriments?.energy_kcal_100g || 0)} kcal per 100g</p>
+                 <p className="text-sm text-gray-500 mb-4">{Math.round((selectedProduct.nutriments?.['energy-kcal_100g'] || selectedProduct.nutriments?.['energy-kcal'] || (selectedProduct.nutriments?.energy_100g ? selectedProduct.nutriments.energy_100g / 4.184 : 0)) || 0)} kcal per 100g</p>
                  
                  <label className="text-sm font-semibold mb-2 block">Quantità mangiata (in grammi o ml)</label>
                  <Input type="number" value={servingQty} onChange={(e) => setServingQty(Number(e.target.value))} className="text-center text-xl" />
@@ -278,7 +278,7 @@ export default function Diary() {
                  <div className="flex flex-col items-center"><span className="font-bold text-blue-500">{Math.round(((selectedProduct.nutriments?.carbohydrates_100g || 0) * servingQty/100))}g</span>Carbo</div>
                  <div className="flex flex-col items-center"><span className="font-bold text-red-500">{Math.round(((selectedProduct.nutriments?.proteins_100g || 0) * servingQty/100))}g</span>Pro</div>
                  <div className="flex flex-col items-center"><span className="font-bold text-amber-500">{Math.round(((selectedProduct.nutriments?.fat_100g || 0) * servingQty/100))}g</span>Grassi</div>
-                 <div className="flex flex-col items-center"><span className="font-bold text-black">{Math.round(((selectedProduct.nutriments?.energy_kcal_100g || 0) * servingQty/100))}</span>kcal</div>
+                 <div className="flex flex-col items-center"><span className="font-bold text-black">{Math.round((((selectedProduct.nutriments?.['energy-kcal_100g'] || selectedProduct.nutriments?.['energy-kcal'] || (selectedProduct.nutriments?.energy_100g ? selectedProduct.nutriments.energy_100g / 4.184 : 0)) || 0) * servingQty/100))}</span>kcal</div>
               </div>
 
               <div className="flex gap-2 mt-4">
