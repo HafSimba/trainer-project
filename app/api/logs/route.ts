@@ -15,7 +15,23 @@ export async function POST(req: Request) {
         const db = client.db('trainer_db');
         const collection = db.collection<DailyLog>('daily_logs');
 
+        // Funzione di utilità per ricalcolare i totali in modo sicuro (evita i negativi da doppi click)
+        const recalculateTotals = (meals: any[]) => {
+            return {
+                total_calories: meals.reduce((sum, m) => sum + (m.calories || 0), 0),
+                total_proteins_g: meals.reduce((sum, m) => sum + (m.proteins_g || 0), 0),
+                total_carbs_g: meals.reduce((sum, m) => sum + (m.carbs_g || 0), 0),
+                total_fats_g: meals.reduce((sum, m) => sum + (m.fats_g || 0), 0),
+            };
+        };
+
         if (action === 'add_meal' && meal) {
+            // Per evitare race conditions e dati sballati, calcoliamo tutto prendendo il documento attuale
+            const doc = await collection.findOne({ userId, date });
+            const currentMeals = doc?.meals_log || [];
+            const updatedMeals = [...currentMeals, meal];
+            const totals = recalculateTotals(updatedMeals);
+
             const updateResult = await collection.findOneAndUpdate(
                 { userId, date },
                 {
@@ -26,12 +42,12 @@ export async function POST(req: Request) {
                         training_log: [],
                         "daily_nutrition_summary.water_intake_ml": 0
                     },
-                    $push: { meals_log: meal },
-                    $inc: {
-                        "daily_nutrition_summary.total_calories": meal.calories,
-                        "daily_nutrition_summary.total_proteins_g": meal.proteins_g,
-                        "daily_nutrition_summary.total_carbs_g": meal.carbs_g,
-                        "daily_nutrition_summary.total_fats_g": meal.fats_g,
+                    $set: {
+                        meals_log: updatedMeals,
+                        "daily_nutrition_summary.total_calories": totals.total_calories,
+                        "daily_nutrition_summary.total_proteins_g": totals.total_proteins_g,
+                        "daily_nutrition_summary.total_carbs_g": totals.total_carbs_g,
+                        "daily_nutrition_summary.total_fats_g": totals.total_fats_g,
                     }
                 },
                 { upsert: true, returnDocument: 'after' }
@@ -40,15 +56,20 @@ export async function POST(req: Request) {
         }
 
         if (action === 'delete_meal' && meal) {
+            const doc = await collection.findOne({ userId, date });
+            const currentMeals = doc?.meals_log || [];
+            const updatedMeals = currentMeals.filter((m: any) => m.id !== meal.id);
+            const totals = recalculateTotals(updatedMeals);
+
             const updateResult = await collection.findOneAndUpdate(
                 { userId, date },
                 {
-                    $pull: { meals_log: { id: meal.id } },
-                    $inc: {
-                        "daily_nutrition_summary.total_calories": -meal.calories,
-                        "daily_nutrition_summary.total_proteins_g": -meal.proteins_g,
-                        "daily_nutrition_summary.total_carbs_g": -meal.carbs_g,
-                        "daily_nutrition_summary.total_fats_g": -meal.fats_g,
+                    $set: {
+                        meals_log: updatedMeals,
+                        "daily_nutrition_summary.total_calories": Math.max(0, totals.total_calories),
+                        "daily_nutrition_summary.total_proteins_g": Math.max(0, totals.total_proteins_g),
+                        "daily_nutrition_summary.total_carbs_g": Math.max(0, totals.total_carbs_g),
+                        "daily_nutrition_summary.total_fats_g": Math.max(0, totals.total_fats_g),
                     }
                 },
                 { returnDocument: 'after' }
@@ -56,17 +77,21 @@ export async function POST(req: Request) {
             return NextResponse.json({ success: true, log: updateResult });
         }
 
-        if (action === 'edit_meal' && meal && body.old_meal) {
-            const { old_meal } = body;
+        if (action === 'edit_meal' && meal) {
+            const doc = await collection.findOne({ userId, date });
+            const currentMeals = doc?.meals_log || [];
+            const updatedMeals = currentMeals.map((m: any) => m.id === meal.id ? meal : m);
+            const totals = recalculateTotals(updatedMeals);
+
             const updateResult = await collection.findOneAndUpdate(
-                { userId, date, "meals_log.id": meal.id },
+                { userId, date },
                 {
-                    $set: { "meals_log.$": meal },
-                    $inc: {
-                        "daily_nutrition_summary.total_calories": meal.calories - old_meal.calories,
-                        "daily_nutrition_summary.total_proteins_g": meal.proteins_g - old_meal.proteins_g,
-                        "daily_nutrition_summary.total_carbs_g": meal.carbs_g - old_meal.carbs_g,
-                        "daily_nutrition_summary.total_fats_g": meal.fats_g - old_meal.fats_g,
+                    $set: {
+                        meals_log: updatedMeals,
+                        "daily_nutrition_summary.total_calories": Math.max(0, totals.total_calories),
+                        "daily_nutrition_summary.total_proteins_g": Math.max(0, totals.total_proteins_g),
+                        "daily_nutrition_summary.total_carbs_g": Math.max(0, totals.total_carbs_g),
+                        "daily_nutrition_summary.total_fats_g": Math.max(0, totals.total_fats_g),
                     }
                 },
                 { returnDocument: 'after' }
@@ -75,7 +100,7 @@ export async function POST(req: Request) {
         }
 
         if (action === 'update_water' && water_ml !== undefined) {
-             const updateResult = await collection.findOneAndUpdate(
+            const updateResult = await collection.findOneAndUpdate(
                 { userId, date },
                 {
                     $setOnInsert: {

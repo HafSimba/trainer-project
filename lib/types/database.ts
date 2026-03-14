@@ -74,6 +74,17 @@ export interface UserProfile {
         description: string;
         schedule: WorkoutDay[];
     };
+    diet_plan: {
+        weekly_schedule: {
+            day_name: string;
+            meals: {
+                colazione: string[];
+                pranzo: string[];
+                cena: string[];
+                snack: string[];
+            }
+        }[];
+    };
     diet_rules: {
         meal_timing: string;
         preferred_foods: string[];

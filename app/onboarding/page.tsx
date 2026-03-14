@@ -13,6 +13,7 @@ export default function Onboarding() {
     const [formData, setFormData] = useState({
         username: '',
         etaGenere: '',
+        peso: '',
         livelloAttuale: '',
         obiettivoPrimario: '',
         tempoDisponibile: '',
@@ -60,10 +61,15 @@ export default function Onboarding() {
                             <label className="text-sm font-semibold mb-1 block">Come ti chiami?</label>
                             <Input required name="username" value={formData.username} onChange={handleChange} placeholder="Es: Mario" />
                         </div>
-                        
+
                         <div>
                             <label className="text-sm font-semibold mb-1 block">Età e Genere</label>
                             <Input required name="etaGenere" value={formData.etaGenere} onChange={handleChange} placeholder="Es: Uomo, 32 anni" />
+                        </div>
+
+                        <div>
+                            <label className="text-sm font-semibold mb-1 block">Peso Corporeo</label>
+                            <Input required name="peso" value={formData.peso} onChange={handleChange} placeholder="Es: 78 kg" />
                         </div>
 
                         <div>
