@@ -22,13 +22,22 @@ export async function POST(req: Request) {
         const cleanMessages = messages.filter((m: any) => !m.content.includes("Impossibile contattare TrAIner"));
 
         let userContextStr = "Nessun dato nutrizionale in memoria al momento.";
+        let profileContextStr = "";
+
         try {
             const today = new Date().toISOString().split('T')[0];
             const mongoClient = await clientPromise;
             const db = mongoClient.db("trainer_db");
-            const collection = db.collection("daily_logs");
+            
+            // FETCH DEL PROFILO E PIANO GENERATO DALL'AI
+            const userProfile = await db.collection("user_profiles").findOne({ userId: PROTOTYPE_USER_ID });
+            if (userProfile) {
+                profileContextStr = `\nPROFILO UTENTE:\nNome: ${userProfile.name}\nObiettivi e Target:\nCalorie: ${userProfile.targets?.daily_calories}, Proteine: ${userProfile.targets?.daily_protein_g}, Carbo: ${userProfile.targets?.daily_carbs_g}, Grassi: ${userProfile.targets?.daily_fats_g}.\nPiano allenamento: ${userProfile.workout_plan?.split_name || 'Non specificato'} - ${userProfile.workout_plan?.description || ''}.\n`;
+            }
 
+            const collection = db.collection("daily_logs");
             const log = await collection.findOne({ userId: PROTOTYPE_USER_ID, date: today });
+
             if (log && log.daily_nutrition_summary) {
                 userContextStr = 'Oggi utente ha consumato: ' + Math.round(log.daily_nutrition_summary.total_calories || 0) + ' kcal. ';
                 if (log.meals_log && log.meals_log.length > 0) {
@@ -49,7 +58,7 @@ export async function POST(req: Request) {
         console.log('Sending Context:', userContextStr);
         const systemMessage = {
              role: "system",
-             content: "Sei TrAIner, il personal trainer e nutrizionista AI dell'utente. Rispondi in modo conciso in italiano. CONTESTO UTENTE OGGI (" + new Date().toISOString().split('T')[0] + "): " + userContextStr
+             content: "Sei TrAIner, il personal trainer e nutrizionista AI dell'utente. Rispondi in modo conciso e amichevole in italiano. " + profileContextStr + " CONTESTO NUTRIZIONALE OGGI (" + new Date().toISOString().split('T')[0] + "): " + userContextStr
         };
 
         const response = await client.chat.completions.create({
