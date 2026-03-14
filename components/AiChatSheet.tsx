@@ -24,7 +24,7 @@ export function AiChatSheet() {
 
         const userMessage = inputValue.trim();
         setInputValue('');
-        
+
         // Aggiunge il messaggio utente a Zustand
         addMessage('user', userMessage);
         setIsLoading(true);
@@ -32,7 +32,7 @@ export function AiChatSheet() {
         try {
             // Costruiamo lo storico corrente da inviare all'API
             const chatHistory = messages.map(msg => ({ role: msg.role, content: msg.content }));
-            
+
             const response = await fetch('/api/chat', {
                 method: 'POST',
                 headers: {
@@ -97,8 +97,8 @@ export function AiChatSheet() {
                                 >
                                     <div
                                         className={`max-w-[80%] rounded-2xl px-4 py-2 ${msg.role === 'user'
-                                                ? 'bg-blue-600 text-white rounded-br-none'
-                                                : 'bg-white border text-gray-800 rounded-bl-none shadow-sm'
+                                            ? 'bg-blue-600 text-white rounded-br-none'
+                                            : 'bg-white border text-gray-800 rounded-bl-none shadow-sm'
                                             }`}
                                     >
                                         <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
