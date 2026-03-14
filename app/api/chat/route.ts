@@ -1,21 +1,15 @@
-﻿import { OpenAI } from "openai";
+import { OpenAI } from "openai";
 import clientPromise from "@/lib/mongodb";
 
-export const revalidate = 0; 
+export const revalidate = 0;
 export const fetchCache = 'force-no-store';
 
-// Auto-fix the URL in case the user forgets to append '/v1' in Vercel.
-let safeBaseURL = process.env.TUNNEL_CLOUDFLARED || "";
-if (safeBaseURL && !safeBaseURL.endsWith('/v1') && !safeBaseURL.endsWith('/v1/')) {
-    safeBaseURL = safeBaseURL.replace(/\/$/, '') + '/v1';
-}
-
 const client = new OpenAI({
-    baseURL: safeBaseURL,
-    apiKey: "not-needed",
+    baseURL: "https://openrouter.ai/api/v1",
+    apiKey: process.env.OPENROUTER_API_KEY,
     defaultHeaders: {
-        "CF-Access-Client-Id": process.env.CF_CLIENT_ID || "",
-        "CF-Access-Client-Secret": process.env.CF_CLIENT_SECRET || "",
+        "HTTP-Referer": "https://trainer-project.vercel.app",
+        "X-Title": "TrAIner",
     }
 });
 
@@ -25,10 +19,9 @@ export async function POST(req: Request) {
     try {
         const { messages } = await req.json();
 
-        // Pulisce l'history in modo da NON inoltrare i messaggi di "Errore" del frontend ad AI
         const cleanMessages = messages.filter((m: any) => !m.content.includes("Impossibile contattare TrAIner"));
 
-        let userContextStr = "Nessun dato nutrizionale in memoria al momento."; 
+        let userContextStr = "Nessun dato nutrizionale in memoria al momento.";
         try {
             const today = new Date().toISOString().split('T')[0];
             const mongoClient = await clientPromise;
@@ -37,7 +30,7 @@ export async function POST(req: Request) {
 
             const log = await collection.findOne({ userId: PROTOTYPE_USER_ID, date: today });
             if (log && log.daily_nutrition_summary) {
-                userContextStr = 'Oggi l utente ha consumato: ' + Math.round(log.daily_nutrition_summary.total_calories || 0) + ' kcal. ';
+                userContextStr = 'Oggi utente ha consumato: ' + Math.round(log.daily_nutrition_summary.total_calories || 0) + ' kcal. ';
                 if (log.meals_log && log.meals_log.length > 0) {
                     userContextStr += 'Ultimi pasti salvati: ';
                     log.meals_log.forEach((m: any) => {
@@ -60,7 +53,7 @@ export async function POST(req: Request) {
         };
 
         const response = await client.chat.completions.create({
-            model: "qwen2.5-vl-7b-instruct",
+            model: "nvidia/nemotron-nano-12b-v2-vl:free",
             messages: [systemMessage, ...cleanMessages],
             stream: true,
         });
@@ -68,7 +61,7 @@ export async function POST(req: Request) {
         const stream = new ReadableStream({
             async start(controller) {
                 for await (const chunk of response) {
-                    const text = chunk.choices[0]?.delta?.content || "";        
+                    const text = chunk.choices[0]?.delta?.content || "";
                     if (text) {
                         controller.enqueue(text);
                     }
@@ -87,6 +80,6 @@ export async function POST(req: Request) {
 
     } catch (error) {
         console.error("AI API Error:", error);
-        return new Response(JSON.stringify({ error: "Errore di connessione al modello AI." }), { status: 500 });
+        return new Response(JSON.stringify({ error: "Errore di connessione al modello AI OpenRouter." }), { status: 500 });
     }
 }
