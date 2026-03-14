@@ -2,11 +2,11 @@
 
 import { useState, useEffect } from "react";
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
-import { Plus, Search, Camera, Droplets, Trash2, Loader2, Home, Pencil } from "lucide-react";
+import { Plus, Search, Camera, Droplets, Trash2, Loader2, Pencil } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { BarcodeScanner } from "@/components/BarcodeScanner";
 import { v4 as uuidv4 } from "uuid";
@@ -30,6 +30,13 @@ export default function Diary() {
 
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
   const [servingQty, setServingQty] = useState<number>(100);
+
+  const getProductCaloriesPer100g = (product: any) => (
+    product?.nutriments?.['energy-kcal_100g']
+    || product?.nutriments?.['energy-kcal']
+    || (product?.nutriments?.energy_100g ? product.nutriments.energy_100g / 4.184 : 0)
+    || 0
+  );
 
   const fetchTodayData = async () => {
     setIsLoading(true);
@@ -77,10 +84,6 @@ export default function Diary() {
     setIsAddDialogOpen(true);
   };
 
-  const handleProductSelect = (product: any) => {
-    setSelectedProduct(product);
-  };
-
   const confirmAddingProduct = async () => {
     if (!selectedProduct) return;
     const ratio = servingQty / 100;
@@ -90,7 +93,7 @@ export default function Diary() {
       time: new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }),
       meal_type: selectedMealType,
       name: selectedProduct.product_name || 'Prodotto Variato',
-      calories: (((selectedProduct.nutriments?.['energy-kcal_100g'] || selectedProduct.nutriments?.['energy-kcal'] || (selectedProduct.nutriments?.energy_100g ? selectedProduct.nutriments.energy_100g / 4.184 : 0)) || 0) * ratio),
+      calories: (getProductCaloriesPer100g(selectedProduct) * ratio),
       proteins_g: ((selectedProduct.nutriments?.proteins_100g || 0) * ratio),
       carbs_g: ((selectedProduct.nutriments?.carbohydrates_100g || 0) * ratio),
       fats_g: ((selectedProduct.nutriments?.fat_100g || 0) * ratio)
@@ -318,20 +321,20 @@ export default function Diary() {
 
               {showScanner && (
                 <div className="bg-black rounded-lg overflow-hidden">
-                  <BarcodeScanner onProductFound={(p) => handleProductSelect(p)} />
+                  <BarcodeScanner onProductFound={setSelectedProduct} />
                 </div>
               )}
 
               <div className="space-y-2">
                 {searchResults.map((item, idx) => (
-                  <Card key={idx} className="cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors" onClick={() => handleProductSelect(item)}>
+                  <Card key={idx} className="cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors" onClick={() => setSelectedProduct(item)}>
                     <CardContent className="p-3 flex justify-between items-center">
                       <div>
                         <p className="font-medium text-sm line-clamp-1">{item.product_name}</p>
                         <p className="text-xs text-gray-500">{item.brands}</p>
                       </div>
                       <span className="text-xs font-semibold bg-gray-100 px-2 py-1 rounded w-fit text-nowrap ml-2 shrink-0">
-                        {Math.round((item.nutriments?.['energy-kcal_100g'] || item.nutriments?.['energy-kcal'] || (item.nutriments?.energy_100g ? item.nutriments.energy_100g / 4.184 : 0)) || 0)} kcal/100g
+                        {Math.round(getProductCaloriesPer100g(item))} kcal/100g
                       </span>
                     </CardContent>
                   </Card>
@@ -342,7 +345,7 @@ export default function Diary() {
             <div className="flex flex-col gap-4 mt-4">
               <div className="text-center mb-2">
                 <h3 className="font-bold text-lg">{selectedProduct.product_name}</h3>
-                <p className="text-sm text-gray-500 mb-4">{Math.round((selectedProduct.nutriments?.['energy-kcal_100g'] || selectedProduct.nutriments?.['energy-kcal'] || (selectedProduct.nutriments?.energy_100g ? selectedProduct.nutriments.energy_100g / 4.184 : 0)) || 0)} kcal per 100g</p>
+                <p className="text-sm text-gray-500 mb-4">{Math.round(getProductCaloriesPer100g(selectedProduct))} kcal per 100g</p>
 
                 <label className="text-sm font-semibold mb-2 block">Quantità mangiata (in grammi o ml)</label>
                 <Input type="number" value={servingQty} onChange={(e) => setServingQty(Number(e.target.value))} className="text-center text-xl" />
@@ -352,7 +355,7 @@ export default function Diary() {
                 <div className="flex flex-col items-center"><span className="font-bold text-blue-500">{Math.round(((selectedProduct.nutriments?.carbohydrates_100g || 0) * servingQty / 100))}g</span>Carbo</div>
                 <div className="flex flex-col items-center"><span className="font-bold text-red-500">{Math.round(((selectedProduct.nutriments?.proteins_100g || 0) * servingQty / 100))}g</span>Pro</div>
                 <div className="flex flex-col items-center"><span className="font-bold text-amber-500">{Math.round(((selectedProduct.nutriments?.fat_100g || 0) * servingQty / 100))}g</span>Grassi</div>
-                <div className="flex flex-col items-center"><span className="font-bold text-black">{Math.round((((selectedProduct.nutriments?.['energy-kcal_100g'] || selectedProduct.nutriments?.['energy-kcal'] || (selectedProduct.nutriments?.energy_100g ? selectedProduct.nutriments.energy_100g / 4.184 : 0)) || 0) * servingQty / 100))}</span>kcal</div>
+                <div className="flex flex-col items-center"><span className="font-bold text-black">{Math.round((getProductCaloriesPer100g(selectedProduct) * servingQty / 100))}</span>kcal</div>
               </div>
 
               <div className="flex gap-2 mt-4">

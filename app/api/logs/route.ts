@@ -1,6 +1,6 @@
 ﻿import { NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
-import { DailyLog, Meal } from '@/lib/types/database';
+import { DailyLog } from '@/lib/types/database';
 
 export async function POST(req: Request) {
     try {
@@ -14,9 +14,10 @@ export async function POST(req: Request) {
         const client = await clientPromise;
         const db = client.db('trainer_db');
         const collection = db.collection<DailyLog>('daily_logs');
+        const clampToZero = (value: number) => Math.max(0, value);
 
         // Funzione di utilità per ricalcolare i totali in modo sicuro (evita i negativi da doppi click)
-        const recalculateTotals = (meals: any[]) => {
+        const recalculateTotals = (meals: DailyLog['meals_log']) => {
             return {
                 total_calories: meals.reduce((sum, m) => sum + (m.calories || 0), 0),
                 total_proteins_g: meals.reduce((sum, m) => sum + (m.proteins_g || 0), 0),
@@ -66,10 +67,10 @@ export async function POST(req: Request) {
                 {
                     $set: {
                         meals_log: updatedMeals,
-                        "daily_nutrition_summary.total_calories": Math.max(0, totals.total_calories),
-                        "daily_nutrition_summary.total_proteins_g": Math.max(0, totals.total_proteins_g),
-                        "daily_nutrition_summary.total_carbs_g": Math.max(0, totals.total_carbs_g),
-                        "daily_nutrition_summary.total_fats_g": Math.max(0, totals.total_fats_g),
+                        "daily_nutrition_summary.total_calories": clampToZero(totals.total_calories),
+                        "daily_nutrition_summary.total_proteins_g": clampToZero(totals.total_proteins_g),
+                        "daily_nutrition_summary.total_carbs_g": clampToZero(totals.total_carbs_g),
+                        "daily_nutrition_summary.total_fats_g": clampToZero(totals.total_fats_g),
                     }
                 },
                 { returnDocument: 'after' }
@@ -88,10 +89,10 @@ export async function POST(req: Request) {
                 {
                     $set: {
                         meals_log: updatedMeals,
-                        "daily_nutrition_summary.total_calories": Math.max(0, totals.total_calories),
-                        "daily_nutrition_summary.total_proteins_g": Math.max(0, totals.total_proteins_g),
-                        "daily_nutrition_summary.total_carbs_g": Math.max(0, totals.total_carbs_g),
-                        "daily_nutrition_summary.total_fats_g": Math.max(0, totals.total_fats_g),
+                        "daily_nutrition_summary.total_calories": clampToZero(totals.total_calories),
+                        "daily_nutrition_summary.total_proteins_g": clampToZero(totals.total_proteins_g),
+                        "daily_nutrition_summary.total_carbs_g": clampToZero(totals.total_carbs_g),
+                        "daily_nutrition_summary.total_fats_g": clampToZero(totals.total_fats_g),
                     }
                 },
                 { returnDocument: 'after' }

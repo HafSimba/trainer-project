@@ -19,6 +19,7 @@ export async function POST(req: Request) {
     try {
         const body = await req.json();
         const { username, etaGenere, peso, livelloAttuale, obiettivoPrimario, tempoDisponibile, equipaggiamento } = body;
+        const normalizeJsonResponse = (content: string) => content.replace(/```json/g, '').replace(/```/g, '').trim();
 
         const commonContext = `Nome: ${username}
 Età e Genere: ${etaGenere}
@@ -91,11 +92,8 @@ NON RESTITUIRE NULL'ALTRO OLTRE L'OGGETTO JSON.`;
             })
         ]);
 
-        let workoutText = workoutResponse.choices[0]?.message?.content || '{}';
-        workoutText = workoutText.replace(/```json/g, '').replace(/```/g, '').trim();
-
-        let dietText = dietResponse.choices[0]?.message?.content || '{}';
-        dietText = dietText.replace(/```json/g, '').replace(/```/g, '').trim();
+        const workoutText = normalizeJsonResponse(workoutResponse.choices[0]?.message?.content || '{}');
+        const dietText = normalizeJsonResponse(dietResponse.choices[0]?.message?.content || '{}');
 
         // Facciamo il parse di entrambi
         const workoutData = JSON.parse(workoutText);

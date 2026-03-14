@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Bot, Send, User, Trash2 } from 'lucide-react';
+import { Bot, Send, Trash2 } from 'lucide-react';
 import { useAiChatStore } from '@/lib/store/aiChatStore';
 import {
     Sheet,

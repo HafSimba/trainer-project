@@ -28,7 +28,7 @@ export async function POST(req: Request) {
             const today = new Date().toISOString().split('T')[0];
             const mongoClient = await clientPromise;
             const db = mongoClient.db("trainer_db");
-            
+
             // FETCH DEL PROFILO E PIANO GENERATO DALL'AI
             const userProfile = await db.collection("user_profiles").findOne({ userId: PROTOTYPE_USER_ID });
             if (userProfile) {
@@ -49,16 +49,15 @@ export async function POST(req: Request) {
                     userContextStr += "Nessun pasto registrato oggi. ";
                 }
             } else {
-                 userContextStr = "L'utente non ha registrato pasti. Ricordagli di aggiungere i pasti alla dashboard se fa domande o si aspetta che tu li sappia.";
+                userContextStr = "L'utente non ha registrato pasti. Ricordagli di aggiungere i pasti alla dashboard se fa domande o si aspetta che tu li sappia.";
             }
         } catch (e) {
             console.error("DB Fetch Error in Chat Route:", e);
         }
 
-        console.log('Sending Context:', userContextStr);
         const systemMessage = {
-             role: "system",
-             content: "Sei TrAIner, il personal trainer e nutrizionista AI dell'utente. Rispondi in modo conciso e amichevole in italiano. " + profileContextStr + " CONTESTO NUTRIZIONALE OGGI (" + new Date().toISOString().split('T')[0] + "): " + userContextStr
+            role: "system",
+            content: "Sei TrAIner, il personal trainer e nutrizionista AI dell'utente. Rispondi in modo conciso e amichevole in italiano. " + profileContextStr + " CONTESTO NUTRIZIONALE OGGI (" + new Date().toISOString().split('T')[0] + "): " + userContextStr
         };
 
         const response = await client.chat.completions.create({

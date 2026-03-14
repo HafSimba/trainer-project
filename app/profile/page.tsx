@@ -1,7 +1,7 @@
 import clientPromise from '@/lib/mongodb';
 import { UserProfile } from '@/lib/types/database';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { User, Activity, Flame, Dumbbell, Info } from 'lucide-react';
+import { User, Flame, Dumbbell } from 'lucide-react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 
