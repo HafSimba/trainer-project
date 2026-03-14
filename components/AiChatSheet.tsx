@@ -17,20 +17,46 @@ import { Button } from '@/components/ui/button';
 export function AiChatSheet() {
     const { messages, isOpen, setChatOpen, addMessage, clearMessages } = useAiChatStore();
     const [inputValue, setInputValue] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
 
-    const handleSend = () => {
-        if (!inputValue.trim()) return;
+    const handleSend = async () => {
+        if (!inputValue.trim() || isLoading) return;
 
-        // Add user message
-        addMessage('user', inputValue.trim());
-
-        // TODO: Connect to backend for real AI response
-        // Simulated AI response for now
-        setTimeout(() => {
-            addMessage('assistant', `Ho ricevuto il tuo messaggio! Questa è una risposta simulata per: "${inputValue}"`);
-        }, 1000);
-
+        const userMessage = inputValue.trim();
         setInputValue('');
+        
+        // Aggiunge il messaggio utente a Zustand
+        addMessage('user', userMessage);
+        setIsLoading(true);
+
+        try {
+            // Costruiamo lo storico corrente da inviare all'API
+            const chatHistory = messages.map(msg => ({ role: msg.role, content: msg.content }));
+            
+            const response = await fetch('/api/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    messages: [...chatHistory, { role: 'user', content: userMessage }]
+                }),
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || 'Errore nella rete');
+            }
+
+            // Aggiungiamo la risposta reale generata localmente
+            addMessage('assistant', data.content);
+        } catch (error) {
+            console.error('Chat error:', error);
+            addMessage('assistant', '⚠️ Impossibile contattare TrAIner in questo momento. Il tunnel locale è attivo?');
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     return (
@@ -75,13 +101,22 @@ export function AiChatSheet() {
                                                 : 'bg-white border text-gray-800 rounded-bl-none shadow-sm'
                                             }`}
                                     >
-                                        <p className="text-sm">{msg.content}</p>
+                                        <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
                                         <p className="text-[10px] opacity-70 mt-1 text-right">
                                             {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                         </p>
                                     </div>
                                 </div>
                             ))
+                        )}
+                        {isLoading && (
+                            <div className="flex justify-start">
+                                <div className="max-w-[80%] rounded-2xl px-4 py-3 bg-white border text-gray-800 rounded-bl-none shadow-sm flex gap-1">
+                                    <span className="animate-bounce">●</span>
+                                    <span className="animate-bounce" style={{ animationDelay: '0.2s' }}>●</span>
+                                    <span className="animate-bounce" style={{ animationDelay: '0.4s' }}>●</span>
+                                </div>
+                            </div>
                         )}
                     </div>
                 </ScrollArea>
@@ -91,12 +126,13 @@ export function AiChatSheet() {
                         value={inputValue}
                         onChange={(e) => setInputValue(e.target.value)}
                         placeholder="Chiedi a TrAIner..."
-                        className="flex-1 rounded-full bg-gray-100 border-none px-4"
+                        className="flex-1 rounded-full bg-gray-100 border-none px-4 disabled:opacity-50"
+                        disabled={isLoading}
                         onKeyDown={(e) => {
                             if (e.key === 'Enter') handleSend();
                         }}
                     />
-                    <Button size="icon" className="rounded-full bg-blue-600 hover:bg-blue-700 shrink-0" onClick={handleSend}>
+                    <Button size="icon" className="rounded-full bg-blue-600 hover:bg-blue-700 shrink-0" disabled={isLoading} onClick={handleSend}>
                         <Send className="h-4 w-4 text-white" />
                     </Button>
                 </div>
