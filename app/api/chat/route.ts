@@ -1,4 +1,4 @@
-import { OpenAI } from "openai";
+﻿import { OpenAI } from "openai";
 import clientPromise from "@/lib/mongodb";
 
 export const revalidate = 0;
@@ -55,31 +55,15 @@ export async function POST(req: Request) {
         const response = await client.chat.completions.create({
             model: "nvidia/nemotron-nano-12b-v2-vl:free",
             messages: [systemMessage, ...cleanMessages],
-            stream: true,
+            stream: false,
         });
 
-        const stream = new ReadableStream({
-            async start(controller) {
-                for await (const chunk of response) {
-                    const text = chunk.choices[0]?.delta?.content || "";
-                    if (text) {
-                        controller.enqueue(text);
-                    }
-                }
-                controller.close();
-            },
-        });
+        const replyContent = response.choices[0]?.message?.content || "Scusa, non sono riuscito a elaborare la risposta.";
 
-        return new Response(stream, {
-            headers: {
-                "Content-Type": "text/event-stream",
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-            },
-        });
+        return Response.json({ content: replyContent });
 
     } catch (error) {
         console.error("AI API Error:", error);
-        return new Response(JSON.stringify({ error: "Errore di connessione al modello AI OpenRouter." }), { status: 500 });
+        return new Response(JSON.stringify({ error: "Errore di connessione al modello AI OpenRouter." }), { status: 500, headers: { "Content-Type": "application/json" } });
     }
 }
