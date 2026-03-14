@@ -1,11 +1,17 @@
-import { OpenAI } from "openai";
+﻿import { OpenAI } from "openai";
 import clientPromise from "@/lib/mongodb";
 
-export const revalidate = 0; // Force Next.js not to cache this API route. Very important for Chat and DB.
+export const revalidate = 0; 
 export const fetchCache = 'force-no-store';
 
+// Auto-fix the URL in case the user forgets to append '/v1' in Vercel.
+let safeBaseURL = process.env.TUNNEL_CLOUDFLARED || "";
+if (safeBaseURL && !safeBaseURL.endsWith('/v1') && !safeBaseURL.endsWith('/v1/')) {
+    safeBaseURL = safeBaseURL.replace(/\/$/, '') + '/v1';
+}
+
 const client = new OpenAI({
-    baseURL: process.env.TUNNEL_CLOUDFLARED,
+    baseURL: safeBaseURL,
     apiKey: "not-needed",
     defaultHeaders: {
         "CF-Access-Client-Id": process.env.CF_CLIENT_ID || "",
@@ -19,13 +25,16 @@ export async function POST(req: Request) {
     try {
         const { messages } = await req.json();
 
-        let userContextStr = "Nessun dato nutrizionale in memoria al momento.";
+        // Pulisce l'history in modo da NON inoltrare i messaggi di "Errore" del frontend ad AI
+        const cleanMessages = messages.filter((m: any) => !m.content.includes("Impossibile contattare TrAIner"));
+
+        let userContextStr = "Nessun dato nutrizionale in memoria al momento."; 
         try {
             const today = new Date().toISOString().split('T')[0];
             const mongoClient = await clientPromise;
             const db = mongoClient.db("trainer_db");
             const collection = db.collection("daily_logs");
-            
+
             const log = await collection.findOne({ userId: PROTOTYPE_USER_ID, date: today });
             if (log && log.daily_nutrition_summary) {
                 userContextStr = 'Oggi l utente ha consumato: ' + Math.round(log.daily_nutrition_summary.total_calories || 0) + ' kcal. ';
@@ -52,14 +61,14 @@ export async function POST(req: Request) {
 
         const response = await client.chat.completions.create({
             model: "qwen2.5-vl-7b-instruct",
-            messages: [systemMessage, ...messages],
+            messages: [systemMessage, ...cleanMessages],
             stream: true,
         });
 
         const stream = new ReadableStream({
             async start(controller) {
                 for await (const chunk of response) {
-                    const text = chunk.choices[0]?.delta?.content || "";
+                    const text = chunk.choices[0]?.delta?.content || "";        
                     if (text) {
                         controller.enqueue(text);
                     }
@@ -81,6 +90,3 @@ export async function POST(req: Request) {
         return new Response(JSON.stringify({ error: "Errore di connessione al modello AI." }), { status: 500 });
     }
 }
-
-
-
