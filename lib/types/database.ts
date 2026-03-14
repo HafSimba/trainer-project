@@ -1,6 +1,7 @@
 export interface Meal {
     id: string; // uuid
-    time: string; // formato HH:mm
+    time: string;
+    meal_type?: 'colazione' | 'pranzo' | 'cena' | 'snack';
     name: string;
     calories: number;
     proteins_g: number;

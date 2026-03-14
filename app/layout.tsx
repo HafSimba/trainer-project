@@ -1,7 +1,8 @@
-import type { Metadata } from "next";
+﻿import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AiChatSheet } from "@/components/AiChatSheet";
+import { BottomNav } from "@/components/BottomNav";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -26,11 +27,12 @@ export default function RootLayout({
   return (
     <html lang="it">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-gray-100 flex justify-center min-h-screen`}
+        className={\\ \ antialiased bg-gray-100 flex justify-center min-h-screen\}
       >
-        <div className="w-full max-w-md bg-white min-h-[100dvh] relative shadow-2xl overflow-x-hidden flex flex-col">
+        <div className="w-full max-w-md bg-white min-h-[100dvh] relative shadow-2xl overflow-x-hidden flex flex-col pb-16">
           {children}
           <AiChatSheet />
+          <BottomNav />
         </div>
       </body>
     </html>
