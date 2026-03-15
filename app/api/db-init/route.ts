@@ -21,9 +21,34 @@ export async function GET() {
             { unique: true } // userId e data devono essere combinati in modo univoco per "Documento Denso"
         );
 
+        const profileCollections = await db.listCollections({ name: 'user_profiles' }).toArray();
+        if (profileCollections.length === 0) {
+            await db.createCollection('user_profiles');
+        }
+
+        const profilesCollection = db.collection('user_profiles');
+        const cleanupResult = await profilesCollection.updateMany(
+            {
+                $or: [
+                    { etaGenere: { $exists: true } },
+                    { 'onboarding_input.etaGenere': { $exists: true } },
+                ],
+            },
+            {
+                $unset: {
+                    etaGenere: '',
+                    'onboarding_input.etaGenere': '',
+                },
+            }
+        );
+
         return NextResponse.json({
             success: true,
-            message: 'Database trainer_db inizializzato e indici creati con successo su daily_logs!'
+            message: 'Database trainer_db inizializzato, indici creati e cleanup etaGenere completato.',
+            cleanup: {
+                matched: cleanupResult.matchedCount,
+                modified: cleanupResult.modifiedCount,
+            },
         });
     } catch (error: any) {
         console.error('Errore durante l\'inizializzazione del database:', error);

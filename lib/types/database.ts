@@ -55,11 +55,30 @@ export interface UserProfile {
     _id?: string;
     userId: string;
     name: string;
+    onboarding_input?: {
+        name: string;
+        age: number;
+        gender: 'Uomo' | 'Donna' | 'Altro';
+        height_cm: number;
+        weight_kg: number;
+        attitude_consistency?: string;
+        attitude_recovery: string;
+        attitude_stress: string;
+        attitude_intensity: string;
+        level: string;
+        goal: string;
+        available_days_per_week: number;
+        available_days_label: string;
+        has_food_restrictions: boolean;
+        food_restrictions_notes: string;
+        equipment: string;
+        submitted_at: string;
+    };
     personal_info: {
         age?: number;
         weight_kg?: number;
         height_cm?: number;
-        gender?: 'M' | 'F' | 'Other';
+        gender?: 'M' | 'F' | 'Other' | 'Uomo' | 'Donna' | 'Altro';
         activity_level?: 'sedentario' | 'leggero' | 'moderato' | 'attivo' | 'molto_attivo';
     };
     targets: {
