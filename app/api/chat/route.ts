@@ -16,11 +16,122 @@ const client = new OpenAI({
 const PROTOTYPE_USER_ID = "tester-user-123";
 const DAYS_OF_WEEK = ["Domenica", "Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato"];
 const REPORT_KEYWORDS = /\b(report|recap|riepilogo|andamento|analisi|analizza|confronta|confronto|com[eè] andata|giornata)\b/i;
+const CHAT_MODEL = "nvidia/nemotron-nano-12b-v2-vl:free";
+
+type ChatRole = "user" | "assistant" | "system";
 
 type ChatMessage = {
-    role: "user" | "assistant" | "system";
+    role: ChatRole;
     content: string;
 };
+
+type UserTargets = {
+    daily_calories?: number;
+    daily_carbs_g?: number;
+    daily_protein_g?: number;
+    daily_fats_g?: number;
+};
+
+type WorkoutScheduleDay = {
+    day_name?: string;
+    workout_type?: string;
+    exercises?: unknown[];
+};
+
+type UserProfileSnapshot = {
+    name?: string;
+    targets?: UserTargets;
+    workout_plan?: {
+        split_name?: string;
+        schedule?: WorkoutScheduleDay[];
+    };
+};
+
+type MealLogItem = {
+    name?: string;
+    calories?: number;
+};
+
+type TrainingLogItem = {
+    type?: string;
+    duration_minutes?: number;
+};
+
+type DailyNutritionSummary = {
+    total_calories?: number;
+    total_carbs_g?: number;
+    total_proteins_g?: number;
+    total_fats_g?: number;
+};
+
+type DailyLogSnapshot = {
+    meals_log?: MealLogItem[];
+    training_log?: TrainingLogItem[];
+    daily_nutrition_summary?: DailyNutritionSummary;
+};
+
+type NutritionComparison = {
+    targets: {
+        calories: number;
+        carbs: number;
+        proteins: number;
+        fats: number;
+    };
+    consumed: {
+        calories: number;
+        carbs: number;
+        proteins: number;
+        fats: number;
+    };
+    deltas: {
+        calories: number;
+        carbs: number;
+        proteins: number;
+        fats: number;
+    };
+    adherence: {
+        calories: number;
+        carbs: number;
+        proteins: number;
+        fats: number;
+    };
+    status: {
+        calories: string;
+        carbs: string;
+        proteins: string;
+        fats: string;
+    };
+    mealsCount: number;
+};
+
+type WorkoutComparison = {
+    plannedType: string;
+    plannedExercises: number;
+    loggedSessionsText: string;
+    status: string;
+};
+
+function normalizeChatRole(value: unknown): ChatRole {
+    if (value === "assistant") return "assistant";
+    if (value === "system") return "system";
+    return "user";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return !!value && typeof value === "object";
+}
+
+function sanitizeMessages(rawMessages: unknown): ChatMessage[] {
+    if (!Array.isArray(rawMessages)) return [];
+
+    return rawMessages
+        .filter((message) => isRecord(message) && typeof message.content === "string" && typeof message.role === "string")
+        .filter((message) => !message.content.includes("Impossibile contattare TrAIner"))
+        .map((message) => ({
+            role: normalizeChatRole(message.role),
+            content: message.content,
+        }));
+}
 
 function toNumber(value: unknown): number {
     const parsed = typeof value === "number" ? value : Number(value);
@@ -59,7 +170,7 @@ function shouldGenerateReport(messages: ChatMessage[]): boolean {
     return REPORT_KEYWORDS.test(lastUserMessage.toLowerCase());
 }
 
-function buildProfileContext(userProfile: any): string {
+function buildProfileContext(userProfile: UserProfileSnapshot | null): string {
     if (!userProfile) {
         return "PROFILO UTENTE: non disponibile. Invita l'utente a completare l'onboarding se chiede piano/target personalizzati.";
     }
@@ -75,17 +186,20 @@ function buildProfileContext(userProfile: any): string {
     ].join("\n");
 }
 
-function buildMealsContext(dailyLog: any): string {
+function buildMealsContext(dailyLog: DailyLogSnapshot | null): string {
     const meals = Array.isArray(dailyLog?.meals_log) ? dailyLog.meals_log : [];
     if (meals.length === 0) return "Nessun pasto registrato oggi.";
 
     return meals
         .slice(-8)
-        .map((meal: any) => `${meal.name || "Alimento"} (${Math.round(toNumber(meal.calories))} kcal)`)
+        .map((meal) => `${meal.name || "Alimento"} (${Math.round(toNumber(meal.calories))} kcal)`)
         .join(", ");
 }
 
-function buildDailyNutritionComparison(userProfile: any, dailyLog: any) {
+function buildDailyNutritionComparison(
+    userProfile: UserProfileSnapshot | null,
+    dailyLog: DailyLogSnapshot | null
+): NutritionComparison {
     const targets = {
         calories: Math.round(toNumber(userProfile?.targets?.daily_calories)),
         carbs: Math.round(toNumber(userProfile?.targets?.daily_carbs_g)),
@@ -133,18 +247,22 @@ function buildDailyNutritionComparison(userProfile: any, dailyLog: any) {
     };
 }
 
-function buildWorkoutComparison(userProfile: any, dailyLog: any, currentDayName: string) {
+function buildWorkoutComparison(
+    userProfile: UserProfileSnapshot | null,
+    dailyLog: DailyLogSnapshot | null,
+    currentDayName: string
+): WorkoutComparison {
     const schedule = Array.isArray(userProfile?.workout_plan?.schedule)
         ? userProfile.workout_plan.schedule
         : [];
 
-    const plannedWorkout = schedule.find((day: any) => normalizeForMatch(day?.day_name) === normalizeForMatch(currentDayName));
+    const plannedWorkout = schedule.find((day) => normalizeForMatch(day?.day_name) === normalizeForMatch(currentDayName));
     const plannedType = plannedWorkout?.workout_type || "Riposo / nessuna seduta pianificata";
     const plannedExercises = Array.isArray(plannedWorkout?.exercises) ? plannedWorkout.exercises.length : 0;
 
     const loggedSessions = Array.isArray(dailyLog?.training_log) ? dailyLog.training_log : [];
     const loggedSessionsText = loggedSessions.length > 0
-        ? loggedSessions.map((session: any) => {
+        ? loggedSessions.map((session) => {
             const duration = Math.round(toNumber(session?.duration_minutes));
             return `${session?.type || "Sessione"} (${duration} min)`;
         }).join(", ")
@@ -167,18 +285,76 @@ function buildWorkoutComparison(userProfile: any, dailyLog: any, currentDayName:
     };
 }
 
+async function fetchUserContext(today: string): Promise<{
+    userProfile: UserProfileSnapshot | null;
+    dailyLog: DailyLogSnapshot | null;
+}> {
+    try {
+        const mongoClient = await clientPromise;
+        const db = mongoClient.db("trainer_db");
+
+        const [userProfile, dailyLog] = await Promise.all([
+            db.collection<UserProfileSnapshot>("user_profiles").findOne({ userId: PROTOTYPE_USER_ID }),
+            db.collection<DailyLogSnapshot>("daily_logs").findOne({ userId: PROTOTYPE_USER_ID, date: today }),
+        ]);
+
+        return { userProfile, dailyLog };
+    } catch (dbError) {
+        console.error("DB Fetch Error in Chat Route:", dbError);
+        return { userProfile: null, dailyLog: null };
+    }
+}
+
+function buildCalculatedReportContext(
+    today: string,
+    currentDayName: string,
+    nutritionReport: NutritionComparison,
+    mealsContextStr: string,
+    workoutReport: WorkoutComparison
+): string {
+    return [
+        `REPORT GIORNALIERO CALCOLATO (${today}):`,
+        `TARGET -> kcal: ${nutritionReport.targets.calories}, carbo: ${nutritionReport.targets.carbs}g, proteine: ${nutritionReport.targets.proteins}g, grassi: ${nutritionReport.targets.fats}g`,
+        `CONSUMATI -> kcal: ${nutritionReport.consumed.calories}, carbo: ${nutritionReport.consumed.carbs}g, proteine: ${nutritionReport.consumed.proteins}g, grassi: ${nutritionReport.consumed.fats}g`,
+        `SCOSTAMENTI -> kcal: ${formatSigned(nutritionReport.deltas.calories)}, carbo: ${formatSigned(nutritionReport.deltas.carbs)}g, proteine: ${formatSigned(nutritionReport.deltas.proteins)}g, grassi: ${formatSigned(nutritionReport.deltas.fats)}g`,
+        `ADERENZA -> kcal: ${nutritionReport.adherence.calories}%, carbo: ${nutritionReport.adherence.carbs}%, proteine: ${nutritionReport.adherence.proteins}%, grassi: ${nutritionReport.adherence.fats}%`,
+        `ESITO NUTRIZIONE -> kcal: ${nutritionReport.status.calories}, carbo: ${nutritionReport.status.carbs}, proteine: ${nutritionReport.status.proteins}, grassi: ${nutritionReport.status.fats}`,
+        `PASTI REGISTRATI (${nutritionReport.mealsCount}) -> ${mealsContextStr}`,
+        `ALLENAMENTO PIANIFICATO OGGI (${currentDayName}) -> ${workoutReport.plannedType} (${workoutReport.plannedExercises} esercizi)`,
+        `ALLENAMENTO REGISTRATO -> ${workoutReport.loggedSessionsText}`,
+        `ESITO ALLENAMENTO -> ${workoutReport.status}`,
+    ].join("\n");
+}
+
+function buildSystemMessage(
+    reportRequested: boolean,
+    profileContextStr: string,
+    calculatedReportContext: string
+): ChatMessage {
+    return {
+        role: "system",
+        content: [
+            "Sei TrAIner, personal trainer e nutrizionista AI.",
+            "Rispondi in italiano in modo chiaro, concreto e sintetico.",
+            "Quando parli di report o giudizi giornalieri usa i numeri del blocco 'REPORT GIORNALIERO CALCOLATO' senza inventare dati.",
+            "Se mancano dati, dichiaralo esplicitamente come 'dato non disponibile'.",
+            `REPORT_RICHIESTO_DALL_UTENTE: ${reportRequested ? "SI" : "NO"}`,
+            "Se REPORT_RICHIESTO_DALL_UTENTE = SI, rispondi SEMPRE con questa struttura:",
+            "1) Stato nutrizione",
+            "2) Confronto numerico vs target",
+            "3) Allenamento di oggi",
+            "4) Esito finale (corretto/non corretto + motivazione)",
+            "5) Azioni pratiche immediate (max 3)",
+            profileContextStr,
+            calculatedReportContext,
+        ].join("\n\n"),
+    };
+}
+
 export async function POST(req: Request) {
     try {
-        const body = await req.json();
-        const rawMessages = Array.isArray(body?.messages) ? body.messages : [];
-
-        const cleanMessages: ChatMessage[] = rawMessages
-            .filter((message: any) => typeof message?.content === "string" && typeof message?.role === "string")
-            .filter((message: any) => !message.content.includes("Impossibile contattare TrAIner"))
-            .map((message: any) => ({
-                role: message.role === "assistant" ? "assistant" : message.role === "system" ? "system" : "user",
-                content: message.content,
-            }));
+        const body = await req.json() as { messages?: unknown };
+        const cleanMessages = sanitizeMessages(body.messages);
 
         if (cleanMessages.length === 0) {
             return Response.json({ content: "Scrivimi pure una domanda e ti rispondo subito." });
@@ -187,20 +363,7 @@ export async function POST(req: Request) {
         const today = new Date().toISOString().split('T')[0];
         const currentDayName = DAYS_OF_WEEK[new Date().getDay()];
 
-        let userProfile: any = null;
-        let dailyLog: any = null;
-
-        try {
-            const mongoClient = await clientPromise;
-            const db = mongoClient.db("trainer_db");
-
-            [userProfile, dailyLog] = await Promise.all([
-                db.collection("user_profiles").findOne({ userId: PROTOTYPE_USER_ID }),
-                db.collection("daily_logs").findOne({ userId: PROTOTYPE_USER_ID, date: today }),
-            ]);
-        } catch (dbError) {
-            console.error("DB Fetch Error in Chat Route:", dbError);
-        }
+        const { userProfile, dailyLog } = await fetchUserContext(today);
 
         const profileContextStr = buildProfileContext(userProfile);
         const mealsContextStr = buildMealsContext(dailyLog);
@@ -208,40 +371,18 @@ export async function POST(req: Request) {
         const workoutReport = buildWorkoutComparison(userProfile, dailyLog, currentDayName);
         const reportRequested = shouldGenerateReport(cleanMessages);
 
-        const calculatedReportContext = [
-            `REPORT GIORNALIERO CALCOLATO (${today}):`,
-            `TARGET -> kcal: ${nutritionReport.targets.calories}, carbo: ${nutritionReport.targets.carbs}g, proteine: ${nutritionReport.targets.proteins}g, grassi: ${nutritionReport.targets.fats}g`,
-            `CONSUMATI -> kcal: ${nutritionReport.consumed.calories}, carbo: ${nutritionReport.consumed.carbs}g, proteine: ${nutritionReport.consumed.proteins}g, grassi: ${nutritionReport.consumed.fats}g`,
-            `SCOSTAMENTI -> kcal: ${formatSigned(nutritionReport.deltas.calories)}, carbo: ${formatSigned(nutritionReport.deltas.carbs)}g, proteine: ${formatSigned(nutritionReport.deltas.proteins)}g, grassi: ${formatSigned(nutritionReport.deltas.fats)}g`,
-            `ADERENZA -> kcal: ${nutritionReport.adherence.calories}%, carbo: ${nutritionReport.adherence.carbs}%, proteine: ${nutritionReport.adherence.proteins}%, grassi: ${nutritionReport.adherence.fats}%`,
-            `ESITO NUTRIZIONE -> kcal: ${nutritionReport.status.calories}, carbo: ${nutritionReport.status.carbs}, proteine: ${nutritionReport.status.proteins}, grassi: ${nutritionReport.status.fats}`,
-            `PASTI REGISTRATI (${nutritionReport.mealsCount}) -> ${mealsContextStr}`,
-            `ALLENAMENTO PIANIFICATO OGGI (${currentDayName}) -> ${workoutReport.plannedType} (${workoutReport.plannedExercises} esercizi)`,
-            `ALLENAMENTO REGISTRATO -> ${workoutReport.loggedSessionsText}`,
-            `ESITO ALLENAMENTO -> ${workoutReport.status}`,
-        ].join("\n");
+        const calculatedReportContext = buildCalculatedReportContext(
+            today,
+            currentDayName,
+            nutritionReport,
+            mealsContextStr,
+            workoutReport
+        );
 
-        const systemMessage = {
-            role: "system" as const,
-            content: [
-                "Sei TrAIner, personal trainer e nutrizionista AI.",
-                "Rispondi in italiano in modo chiaro, concreto e sintetico.",
-                "Quando parli di report o giudizi giornalieri usa i numeri del blocco 'REPORT GIORNALIERO CALCOLATO' senza inventare dati.",
-                "Se mancano dati, dichiaralo esplicitamente come 'dato non disponibile'.",
-                `REPORT_RICHIESTO_DALL_UTENTE: ${reportRequested ? "SI" : "NO"}`,
-                "Se REPORT_RICHIESTO_DALL_UTENTE = SI, rispondi SEMPRE con questa struttura:",
-                "1) Stato nutrizione",
-                "2) Confronto numerico vs target",
-                "3) Allenamento di oggi",
-                "4) Esito finale (corretto/non corretto + motivazione)",
-                "5) Azioni pratiche immediate (max 3)",
-                profileContextStr,
-                calculatedReportContext,
-            ].join("\n\n"),
-        };
+        const systemMessage = buildSystemMessage(reportRequested, profileContextStr, calculatedReportContext);
 
         const response = await client.chat.completions.create({
-            model: "nvidia/nemotron-nano-12b-v2-vl:free",
+            model: CHAT_MODEL,
             messages: [systemMessage, ...cleanMessages],
             stream: false,
             temperature: 0.3,

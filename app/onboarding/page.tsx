@@ -18,6 +18,79 @@ const ATTITUDE_INTENSITY_OPTIONS = ['Progressivo', 'Bilanciato', 'Spinto'];
 const INTERACTIVE_STEPS = 4;
 
 type Step = 0 | 1 | 2 | 3 | 4;
+type AllergyChoice = '' | 'nessuna' | 'presenti';
+
+type OnboardingFormData = {
+    username: string;
+    altezza: string;
+    eta: string;
+    sesso: string;
+    peso: string;
+    disponibilitaSettimanaleIndex: number;
+    attitudineRecuperoIndex: number;
+    attitudineStressIndex: number;
+    attitudineIntensitaIndex: number;
+    livelloAttualeIndex: number;
+    obiettivoPrimarioIndex: number;
+    equipaggiamentoIndex: number;
+    allergieScelta: AllergyChoice;
+    allergieNote: string;
+};
+
+const INITIAL_FORM_DATA: OnboardingFormData = {
+    username: '',
+    altezza: '',
+    eta: '',
+    sesso: '',
+    peso: '',
+    disponibilitaSettimanaleIndex: 3,
+    attitudineRecuperoIndex: 1,
+    attitudineStressIndex: 1,
+    attitudineIntensitaIndex: 1,
+    livelloAttualeIndex: 1,
+    obiettivoPrimarioIndex: 0,
+    equipaggiamentoIndex: 1,
+    allergieScelta: '',
+    allergieNote: ''
+};
+
+function getNextStep(currentStep: Step): Step {
+    if (currentStep === 0) return 1;
+    if (currentStep === 1) return 2;
+    if (currentStep === 2) return 3;
+    return 4;
+}
+
+function getPreviousStep(currentStep: Step): Step {
+    if (currentStep === 4) return 3;
+    if (currentStep === 3) return 2;
+    if (currentStep === 2) return 1;
+    return 0;
+}
+
+function getInteractiveProgress(currentStep: Step): number {
+    return ((currentStep + 1) / INTERACTIVE_STEPS) * 100;
+}
+
+function buildGeneratePlanPayload(formData: OnboardingFormData) {
+    return {
+        username: formData.username.trim(),
+        eta: Number(formData.eta),
+        sesso: formData.sesso,
+        altezzaCm: Number(formData.altezza),
+        pesoKg: Number(formData.peso),
+        disponibilitaSettimanale: formData.disponibilitaSettimanaleIndex + 1,
+        attitudineRecupero: ATTITUDE_RECOVERY_OPTIONS[formData.attitudineRecuperoIndex],
+        attitudineStress: ATTITUDE_STRESS_OPTIONS[formData.attitudineStressIndex],
+        attitudineIntensita: ATTITUDE_INTENSITY_OPTIONS[formData.attitudineIntensitaIndex],
+        livelloAttuale: LEVEL_OPTIONS[formData.livelloAttualeIndex],
+        obiettivoPrimario: GOAL_OPTIONS[formData.obiettivoPrimarioIndex],
+        tempoDisponibile: WEEKLY_AVAILABILITY_OPTIONS[formData.disponibilitaSettimanaleIndex],
+        equipaggiamento: EQUIPMENT_OPTIONS[formData.equipaggiamentoIndex],
+        allergiePresenti: formData.allergieScelta === 'presenti',
+        allergieNote: formData.allergieNote.trim()
+    };
+}
 
 type SliderFieldProps = {
     label: string;
@@ -64,25 +137,15 @@ export default function Onboarding() {
     const [errorMessage, setErrorMessage] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [progress, setProgress] = useState(0);
-    const [formData, setFormData] = useState({
-        username: '',
-        altezza: '',
-        eta: '',
-        sesso: '',
-        peso: '',
-        disponibilitaSettimanaleIndex: 3,
-        attitudineRecuperoIndex: 1,
-        attitudineStressIndex: 1,
-        attitudineIntensitaIndex: 1,
-        livelloAttualeIndex: 1,
-        obiettivoPrimarioIndex: 0,
-        equipaggiamentoIndex: 1,
-        allergieScelta: '',
-        allergieNote: ''
-    });
+    const [formData, setFormData] = useState<OnboardingFormData>(INITIAL_FORM_DATA);
+
+    const updateFormField = <K extends keyof OnboardingFormData>(field: K, value: OnboardingFormData[K]) => {
+        setFormData((prev) => ({ ...prev, [field]: value }));
+    };
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-        setFormData({ ...formData, [e.target.name]: e.target.value });
+        const fieldName = e.target.name as keyof OnboardingFormData;
+        setFormData((prev) => ({ ...prev, [fieldName]: e.target.value }));
     };
 
     useEffect(() => {
@@ -106,6 +169,8 @@ export default function Onboarding() {
         if (progress < 95) return 'Sto preparando il menu settimanale...';
         return 'Sto rifinendo i dettagli finali...';
     }, [progress]);
+
+    const interactiveProgress = useMemo(() => getInteractiveProgress(step), [step]);
 
     const validateStep = (currentStep: Step) => {
         if (currentStep === 0 && !formData.username.trim()) {
@@ -137,22 +202,12 @@ export default function Onboarding() {
         }
 
         setErrorMessage('');
-        setStep((prev) => {
-            if (prev === 0) return 1;
-            if (prev === 1) return 2;
-            if (prev === 2) return 3;
-            return 4;
-        });
+        setStep((prev) => getNextStep(prev));
     };
 
     const previousStep = () => {
         setErrorMessage('');
-        setStep((prev) => {
-            if (prev === 4) return 3;
-            if (prev === 3) return 2;
-            if (prev === 2) return 1;
-            return 0;
-        });
+        setStep((prev) => getPreviousStep(prev));
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -175,23 +230,7 @@ export default function Onboarding() {
         setProgress(8);
 
         try {
-            const payload = {
-                username: formData.username.trim(),
-                eta: Number(formData.eta),
-                sesso: formData.sesso,
-                altezzaCm: Number(formData.altezza),
-                pesoKg: Number(formData.peso),
-                disponibilitaSettimanale: formData.disponibilitaSettimanaleIndex + 1,
-                attitudineRecupero: ATTITUDE_RECOVERY_OPTIONS[formData.attitudineRecuperoIndex],
-                attitudineStress: ATTITUDE_STRESS_OPTIONS[formData.attitudineStressIndex],
-                attitudineIntensita: ATTITUDE_INTENSITY_OPTIONS[formData.attitudineIntensitaIndex],
-                livelloAttuale: LEVEL_OPTIONS[formData.livelloAttualeIndex],
-                obiettivoPrimario: GOAL_OPTIONS[formData.obiettivoPrimarioIndex],
-                tempoDisponibile: WEEKLY_AVAILABILITY_OPTIONS[formData.disponibilitaSettimanaleIndex],
-                equipaggiamento: EQUIPMENT_OPTIONS[formData.equipaggiamentoIndex],
-                allergiePresenti: formData.allergieScelta === 'presenti',
-                allergieNote: formData.allergieNote.trim()
-            };
+            const payload = buildGeneratePlanPayload(formData);
 
             const res = await fetch('/api/generate-plan', {
                 method: 'POST',
@@ -229,9 +268,9 @@ export default function Onboarding() {
                         <div className="mb-6">
                             <div className="flex items-center justify-between text-xs text-gray-500 mb-2">
                                 <span>Step {step + 1} di {INTERACTIVE_STEPS}</span>
-                                <span>{Math.round(((step + 1) / INTERACTIVE_STEPS) * 100)}%</span>
+                                <span>{Math.round(interactiveProgress)}%</span>
                             </div>
-                            <Progress value={((step + 1) / INTERACTIVE_STEPS) * 100} className="h-2" />
+                            <Progress value={interactiveProgress} className="h-2" />
                         </div>
                     )}
 
@@ -280,7 +319,7 @@ export default function Onboarding() {
                                             <button
                                                 key={option}
                                                 type="button"
-                                                onClick={() => setFormData({ ...formData, sesso: option })}
+                                                onClick={() => updateFormField('sesso', option)}
                                                 className={`h-10 rounded-lg border text-sm font-medium transition-colors ${formData.sesso === option
                                                     ? 'bg-blue-600 text-white border-blue-600'
                                                     : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
@@ -314,7 +353,7 @@ export default function Onboarding() {
                                     reason="Fondamentale: indica su quanti giorni (1-7) posso organizzare il piano di allenamento."
                                     options={WEEKLY_AVAILABILITY_OPTIONS}
                                     value={formData.disponibilitaSettimanaleIndex}
-                                    onChange={(nextValue) => setFormData({ ...formData, disponibilitaSettimanaleIndex: nextValue })}
+                                    onChange={(nextValue) => updateFormField('disponibilitaSettimanaleIndex', nextValue)}
                                 />
 
                                 <SliderField
@@ -322,7 +361,7 @@ export default function Onboarding() {
                                     reason="Sonno e recupero guidano la frequenza e il carico sostenibile degli allenamenti."
                                     options={ATTITUDE_RECOVERY_OPTIONS}
                                     value={formData.attitudineRecuperoIndex}
-                                    onChange={(nextValue) => setFormData({ ...formData, attitudineRecuperoIndex: nextValue })}
+                                    onChange={(nextValue) => updateFormField('attitudineRecuperoIndex', nextValue)}
                                 />
 
                                 <SliderField
@@ -330,7 +369,7 @@ export default function Onboarding() {
                                     reason="Un livello di stress più alto richiede una periodizzazione più conservativa."
                                     options={ATTITUDE_STRESS_OPTIONS}
                                     value={formData.attitudineStressIndex}
-                                    onChange={(nextValue) => setFormData({ ...formData, attitudineStressIndex: nextValue })}
+                                    onChange={(nextValue) => updateFormField('attitudineStressIndex', nextValue)}
                                 />
 
                                 <SliderField
@@ -338,7 +377,7 @@ export default function Onboarding() {
                                     reason="Definisce se privilegiare progressione graduale o stimolo più aggressivo."
                                     options={ATTITUDE_INTENSITY_OPTIONS}
                                     value={formData.attitudineIntensitaIndex}
-                                    onChange={(nextValue) => setFormData({ ...formData, attitudineIntensitaIndex: nextValue })}
+                                    onChange={(nextValue) => updateFormField('attitudineIntensitaIndex', nextValue)}
                                 />
                             </section>
                         )}
@@ -352,7 +391,7 @@ export default function Onboarding() {
                                     reason="Per calibrare volume e intensità iniziale in modo realistico."
                                     options={LEVEL_OPTIONS}
                                     value={formData.livelloAttualeIndex}
-                                    onChange={(nextValue) => setFormData({ ...formData, livelloAttualeIndex: nextValue })}
+                                    onChange={(nextValue) => updateFormField('livelloAttualeIndex', nextValue)}
                                 />
 
                                 <SliderField
@@ -360,7 +399,7 @@ export default function Onboarding() {
                                     reason="Per scegliere priorità tra performance, composizione corporea e mantenimento."
                                     options={GOAL_OPTIONS}
                                     value={formData.obiettivoPrimarioIndex}
-                                    onChange={(nextValue) => setFormData({ ...formData, obiettivoPrimarioIndex: nextValue })}
+                                    onChange={(nextValue) => updateFormField('obiettivoPrimarioIndex', nextValue)}
                                 />
 
                                 <SliderField
@@ -368,19 +407,19 @@ export default function Onboarding() {
                                     reason="Mi serve per selezionare esercizi realmente fattibili nel tuo contesto."
                                     options={EQUIPMENT_OPTIONS}
                                     value={formData.equipaggiamentoIndex}
-                                    onChange={(nextValue) => setFormData({ ...formData, equipaggiamentoIndex: nextValue })}
+                                    onChange={(nextValue) => updateFormField('equipaggiamentoIndex', nextValue)}
                                 />
 
                                 <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
                                     <div>
                                         <p className="font-semibold text-gray-900">Hai allergie o casi alimentari specifici?</p>
-                                        <p className="text-xs text-gray-500 mt-1">Esempi: celiachia, intolleranza al lattosio, allergia a frutta secca. Questo dato è usato direttamente dall'AI nel piano alimentare.</p>
+                                        <p className="text-xs text-gray-500 mt-1">Esempi: celiachia, intolleranza al lattosio, allergia a frutta secca. Questo dato è usato direttamente dall’AI nel piano alimentare.</p>
                                     </div>
 
                                     <div className="grid grid-cols-2 gap-2">
                                         <button
                                             type="button"
-                                            onClick={() => setFormData({ ...formData, allergieScelta: 'nessuna', allergieNote: '' })}
+                                            onClick={() => setFormData((prev) => ({ ...prev, allergieScelta: 'nessuna', allergieNote: '' }))}
                                             className={`h-10 rounded-lg border text-sm font-medium transition-colors ${formData.allergieScelta === 'nessuna'
                                                 ? 'bg-blue-600 text-white border-blue-600'
                                                 : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
@@ -390,7 +429,7 @@ export default function Onboarding() {
                                         </button>
                                         <button
                                             type="button"
-                                            onClick={() => setFormData({ ...formData, allergieScelta: 'presenti' })}
+                                            onClick={() => updateFormField('allergieScelta', 'presenti')}
                                             className={`h-10 rounded-lg border text-sm font-medium transition-colors ${formData.allergieScelta === 'presenti'
                                                 ? 'bg-blue-600 text-white border-blue-600'
                                                 : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'

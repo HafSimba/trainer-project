@@ -10,29 +10,89 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { BarcodeScanner } from "@/components/BarcodeScanner";
 import { v4 as uuidv4 } from "uuid";
+import type { DailyLog, Meal } from "@/lib/types/database";
 
 const PROTOTYPE_USER_ID = "tester-user-123";
 const DEFAULT_DAILY_CALORIE_GOAL = 2400;
 
 type MealType = 'colazione' | 'pranzo' | 'cena' | 'snack';
+type EditMacros = { calories: number; carbs_g: number; proteins_g: number; fats_g: number };
+type ProfileApiResponse = { targets?: { daily_calories?: number } };
+
+type OpenFoodNutriments = {
+  'energy-kcal_100g'?: number;
+  'energy-kcal'?: number;
+  energy_100g?: number;
+  proteins_100g?: number;
+  carbohydrates_100g?: number;
+  fat_100g?: number;
+};
+
+type OpenFoodProduct = {
+  product_name?: string;
+  brands?: string;
+  nutriments?: OpenFoodNutriments;
+};
+
+const DEFAULT_EDIT_MACROS: EditMacros = { calories: 0, carbs_g: 0, proteins_g: 0, fats_g: 0 };
+
+function getTodayDate(): string {
+  return new Date().toISOString().split('T')[0];
+}
+
+function createEmptyDailyLog(): DailyLog {
+  return {
+    userId: PROTOTYPE_USER_ID,
+    date: getTodayDate(),
+    metrics: {},
+    meals_log: [],
+    training_log: [],
+    daily_nutrition_summary: {
+      total_calories: 0,
+      total_proteins_g: 0,
+      total_carbs_g: 0,
+      total_fats_g: 0,
+      water_intake_ml: 0,
+    },
+  };
+}
+
+function sanitizeSummary(rawSummary: DailyLog['daily_nutrition_summary'] | null | undefined): DailyLog['daily_nutrition_summary'] {
+  return {
+    total_calories: Math.max(0, rawSummary?.total_calories || 0),
+    total_proteins_g: Math.max(0, rawSummary?.total_proteins_g || 0),
+    total_carbs_g: Math.max(0, rawSummary?.total_carbs_g || 0),
+    total_fats_g: Math.max(0, rawSummary?.total_fats_g || 0),
+    water_intake_ml: Math.max(0, rawSummary?.water_intake_ml || 0)
+  };
+}
+
+async function postLogAction(payload: Record<string, unknown>) {
+  await fetch('/api/logs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+}
 
 export default function Diary() {
-  const [log, setLog] = useState<any>(null);
+  const [log, setLog] = useState<DailyLog | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isChartMounted, setIsChartMounted] = useState(false);
   const [waterGlasses, setWaterGlasses] = useState(0);
   const [dailyCalorieGoal, setDailyCalorieGoal] = useState(DEFAULT_DAILY_CALORIE_GOAL);
 
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [selectedMealType, setSelectedMealType] = useState<MealType>('colazione');
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searchResults, setSearchResults] = useState<OpenFoodProduct[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
 
-  const [selectedProduct, setSelectedProduct] = useState<any>(null);
+  const [selectedProduct, setSelectedProduct] = useState<OpenFoodProduct | null>(null);
   const [servingQty, setServingQty] = useState<number>(100);
 
-  const getProductCaloriesPer100g = (product: any) => (
+  const getProductCaloriesPer100g = (product: OpenFoodProduct | null) => (
     product?.nutriments?.['energy-kcal_100g']
     || product?.nutriments?.['energy-kcal']
     || (product?.nutriments?.energy_100g ? product.nutriments.energy_100g / 4.184 : 0)
@@ -42,15 +102,15 @@ export default function Diary() {
   const fetchTodayData = async () => {
     setIsLoading(true);
     try {
-      const today = new Date().toISOString().split('T')[0];
+      const today = getTodayDate();
       const [res, profileRes] = await Promise.all([
         fetch('/api/logs?userId=' + PROTOTYPE_USER_ID + '&date=' + today),
         fetch('/api/profile?userId=' + PROTOTYPE_USER_ID)
       ]);
 
       const [data, profileData] = await Promise.all([
-        res.json(),
-        profileRes.json()
+        res.json() as Promise<DailyLog | { message?: string }>,
+        profileRes.json() as Promise<ProfileApiResponse>
       ]);
 
       const profileCalories = Number(profileData?.targets?.daily_calories);
@@ -60,11 +120,11 @@ export default function Diary() {
         setDailyCalorieGoal(DEFAULT_DAILY_CALORIE_GOAL);
       }
 
-      if (data && data.daily_nutrition_summary) {
+      if ('daily_nutrition_summary' in data) {
         setLog(data);
         setWaterGlasses(Math.floor((data.daily_nutrition_summary.water_intake_ml || 0) / 250));
       } else {
-        setLog({ meals_log: [], daily_nutrition_summary: { total_calories: 0, total_proteins_g: 0, total_carbs_g: 0, total_fats_g: 0, water_intake_ml: 0 } });
+        setLog(createEmptyDailyLog());
       }
     } catch (e) {
       console.error(e);
@@ -73,7 +133,13 @@ export default function Diary() {
   };
 
   useEffect(() => {
-    fetchTodayData();
+    setIsChartMounted(true);
+
+    const timer = setTimeout(() => {
+      void fetchTodayData();
+    }, 0);
+
+    return () => clearTimeout(timer);
   }, []);
 
   const handleSearch = async () => {
@@ -82,7 +148,7 @@ export default function Diary() {
     setShowScanner(false);
     try {
       const res = await fetch('https://world.openfoodfacts.org/cgi/search.pl?search_terms=' + searchQuery + '&search_simple=1&action=process&json=1&page_size=10');
-      const data = await res.json();
+      const data = await res.json() as { products?: OpenFoodProduct[] };
       setSearchResults(data.products || []);
     } catch (e) {
       console.error(e);
@@ -118,25 +184,16 @@ export default function Diary() {
     setIsAddDialogOpen(false);
 
     try {
-      const today = new Date().toISOString().split('T')[0];
-      await fetch('/api/logs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: PROTOTYPE_USER_ID, date: today, meal })
-      });
+      const today = getTodayDate();
+      await postLogAction({ userId: PROTOTYPE_USER_ID, date: today, meal });
       fetchTodayData();
     } catch (e) {
       console.error(e);
     }
   };
 
-  const rawSummary = log?.daily_nutrition_summary || { total_calories: 0, total_proteins_g: 0, total_carbs_g: 0, total_fats_g: 0 };
-  const summary = {
-    total_calories: Math.max(0, rawSummary.total_calories || 0),
-    total_proteins_g: Math.max(0, rawSummary.total_proteins_g || 0),
-    total_carbs_g: Math.max(0, rawSummary.total_carbs_g || 0),
-    total_fats_g: Math.max(0, rawSummary.total_fats_g || 0)
-  };
+  const rawSummary = log?.daily_nutrition_summary;
+  const summary = sanitizeSummary(rawSummary);
   const calorieProgress = Math.min((summary.total_calories / dailyCalorieGoal) * 100, 100);
   const meals = log?.meals_log || [];
   const pieData = [
@@ -147,11 +204,15 @@ export default function Diary() {
 
   if (pieData.length === 0) pieData.push({ name: 'Vuoto', value: 1, color: '#e5e7eb' });
 
-  const [editingMeal, setEditingMeal] = useState<any>(null);
+  const [editingMeal, setEditingMeal] = useState<Meal | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [editMacros, setEditMacros] = useState({ calories: 0, carbs_g: 0, proteins_g: 0, fats_g: 0 });
+  const [editMacros, setEditMacros] = useState<EditMacros>(DEFAULT_EDIT_MACROS);
 
-  const startEditing = (m: any) => {
+  const updateEditMacro = <K extends keyof EditMacros>(field: K, value: EditMacros[K]) => {
+    setEditMacros((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const startEditing = (m: Meal) => {
     setEditingMeal(m);
     setEditMacros({
       calories: Math.round(m.calories),
@@ -168,17 +229,13 @@ export default function Diary() {
     setIsLoading(true);
     try {
       const updatedMeal = { ...editingMeal, ...editMacros };
-      const today = new Date().toISOString().split('T')[0];
-      await fetch('/api/logs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: PROTOTYPE_USER_ID,
-          date: today,
-          action: 'edit_meal',
-          meal: updatedMeal,
-          old_meal: editingMeal
-        })
+      const today = getTodayDate();
+      await postLogAction({
+        userId: PROTOTYPE_USER_ID,
+        date: today,
+        action: 'edit_meal',
+        meal: updatedMeal,
+        old_meal: editingMeal
       });
       fetchTodayData();
     } catch (e) {
@@ -187,30 +244,56 @@ export default function Diary() {
     }
   };
 
-  const handleDeleteMeal = async (mealToDelete: any) => {
+  const handleDeleteMeal = async (mealToDelete: Meal) => {
     setIsLoading(true);
     try {
-      const today = new Date().toISOString().split('T')[0];
-      await fetch('/api/logs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: PROTOTYPE_USER_ID,
-          date: today,
-          action: 'delete_meal',
-          meal: mealToDelete
-        })
+      const today = getTodayDate();
+      await postLogAction({
+        userId: PROTOTYPE_USER_ID,
+        date: today,
+        action: 'delete_meal',
+        meal: mealToDelete
       });
       fetchTodayData();
     } catch (e) {
       console.error(e);
       setIsLoading(false);
+    }
+  };
+
+  const handleWaterGlassesChange = async (nextGlasses: number) => {
+    const clampedGlasses = Math.max(0, nextGlasses);
+    const nextWaterMl = clampedGlasses * 250;
+
+    setWaterGlasses(clampedGlasses);
+
+    try {
+      const today = getTodayDate();
+      await postLogAction({
+        userId: PROTOTYPE_USER_ID,
+        date: today,
+        action: 'update_water',
+        water_ml: nextWaterMl,
+      });
+
+      setLog((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          daily_nutrition_summary: {
+            ...prev.daily_nutrition_summary,
+            water_intake_ml: nextWaterMl,
+          },
+        };
+      });
+    } catch (e) {
+      console.error(e);
     }
   };
 
   const renderMealSection = (type: MealType, title: string) => {
-    const sectionMeals = meals.filter((m: any) => m.meal_type === type || (!m.meal_type && type === 'colazione'));
-    const sectionCals = sectionMeals.reduce((acc: number, m: any) => acc + (m.calories || 0), 0);
+    const sectionMeals = meals.filter((m) => m.meal_type === type || (!m.meal_type && type === 'colazione'));
+    const sectionCals = sectionMeals.reduce((acc, m) => acc + (m.calories || 0), 0);
 
     return (
       <Card className="mb-4 shadow-sm border-none">
@@ -221,7 +304,7 @@ export default function Diary() {
         <CardContent>
           {sectionMeals.length > 0 ? (
             <ul className="space-y-2 mb-3">
-              {sectionMeals.map((m: any) => (
+              {sectionMeals.map((m) => (
                 <li key={m.id} className="flex justify-between items-center text-sm border-b pb-1 last:border-0">
                   <div className="flex flex-col">
                     <span className="font-medium" style={{ textTransform: 'capitalize' }}>{m.name}</span>
@@ -257,15 +340,17 @@ export default function Diary() {
       <Card className="shadow-sm border-none bg-white">
         <CardContent className="p-4 flex gap-4 items-center">
           <div className="w-1/3 relative h-28">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie data={pieData} dataKey="value" innerRadius={25} outerRadius={40} paddingAngle={2}>
-                  {pieData.map((entry, index) => (
-                    <Cell key={'cell-' + index} fill={entry.color} />
-                  ))}
-                </Pie>
-              </PieChart>
-            </ResponsiveContainer>
+            {isChartMounted && (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={pieData} dataKey="value" innerRadius={25} outerRadius={40} paddingAngle={2}>
+                    {pieData.map((entry, index) => (
+                      <Cell key={'cell-' + index} fill={entry.color} />
+                    ))}
+                  </Pie>
+                </PieChart>
+              </ResponsiveContainer>
+            )}
             <div className="absolute inset-0 flex items-center justify-center flex-col">
               <span className="text-xs font-bold">{Math.round(summary.total_calories)}</span>
               <span className="text-[8px] text-gray-400">kcal</span>
@@ -300,8 +385,8 @@ export default function Diary() {
             </div>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" size="icon" className="h-8 w-8 rounded-full border-blue-200" onClick={() => setWaterGlasses(Math.max(0, waterGlasses - 1))}>-</Button>
-            <Button variant="default" size="icon" className="h-8 w-8 rounded-full bg-blue-500 hover:bg-blue-600" onClick={() => setWaterGlasses(waterGlasses + 1)}>+</Button>
+            <Button variant="outline" size="icon" className="h-8 w-8 rounded-full border-blue-200" onClick={() => void handleWaterGlassesChange(waterGlasses - 1)}>-</Button>
+            <Button variant="default" size="icon" className="h-8 w-8 rounded-full bg-blue-500 hover:bg-blue-600" onClick={() => void handleWaterGlassesChange(waterGlasses + 1)}>+</Button>
           </div>
         </CardContent>
       </Card>
@@ -399,20 +484,20 @@ export default function Diary() {
               <div className="space-y-4">
                 <div>
                   <label className="text-sm font-semibold mb-1 block">Calorie (kcal)</label>
-                  <Input type="number" value={editMacros.calories} onChange={(e) => setEditMacros({ ...editMacros, calories: Number(e.target.value) })} />
+                  <Input type="number" value={editMacros.calories} onChange={(e) => updateEditMacro('calories', Number(e.target.value))} />
                 </div>
                 <div className="grid grid-cols-3 gap-2">
                   <div>
                     <label className="text-xs font-semibold mb-1 block text-blue-500">Carbo (g)</label>
-                    <Input type="number" value={editMacros.carbs_g} onChange={(e) => setEditMacros({ ...editMacros, carbs_g: Number(e.target.value) })} />
+                    <Input type="number" value={editMacros.carbs_g} onChange={(e) => updateEditMacro('carbs_g', Number(e.target.value))} />
                   </div>
                   <div>
                     <label className="text-xs font-semibold mb-1 block text-red-500">Pro (g)</label>
-                    <Input type="number" value={editMacros.proteins_g} onChange={(e) => setEditMacros({ ...editMacros, proteins_g: Number(e.target.value) })} />
+                    <Input type="number" value={editMacros.proteins_g} onChange={(e) => updateEditMacro('proteins_g', Number(e.target.value))} />
                   </div>
                   <div>
                     <label className="text-xs font-semibold mb-1 block text-amber-500">Grassi (g)</label>
-                    <Input type="number" value={editMacros.fats_g} onChange={(e) => setEditMacros({ ...editMacros, fats_g: Number(e.target.value) })} />
+                    <Input type="number" value={editMacros.fats_g} onChange={(e) => updateEditMacro('fats_g', Number(e.target.value))} />
                   </div>
                 </div>
               </div>

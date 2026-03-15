@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Bot, Send, Trash2, X } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { useAiChatStore } from '@/lib/store/aiChatStore';
+import { useAiChatStore, type ChatMessage as StoredChatMessage } from '@/lib/store/aiChatStore';
 import {
     Sheet,
     SheetContent,
@@ -65,6 +65,20 @@ const markdownComponents: Components = {
     td: ({ children }) => <td className="border border-slate-200 px-2 py-1 align-top">{children}</td>,
 };
 
+type ChatApiMessage = Pick<StoredChatMessage, 'role' | 'content'>;
+type ChatApiResponse = {
+    content: string;
+    error?: string;
+};
+
+function buildChatHistory(messages: StoredChatMessage[]): ChatApiMessage[] {
+    return messages.map((message) => ({ role: message.role, content: message.content }));
+}
+
+function formatMessageTime(timestamp: number): string {
+    return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
 export function AiChatSheet() {
     const { messages, isOpen, setChatOpen, addMessage, clearMessages } = useAiChatStore();
     const [inputValue, setInputValue] = useState('');
@@ -89,8 +103,7 @@ export function AiChatSheet() {
         setIsLoading(true);
 
         try {
-            // Costruiamo lo storico corrente da inviare all'API
-            const chatHistory = messages.map(msg => ({ role: msg.role, content: msg.content }));
+            const chatHistory = buildChatHistory(messages);
 
             const response = await fetch('/api/chat', {
                 method: 'POST',
@@ -102,13 +115,12 @@ export function AiChatSheet() {
                 }),
             });
 
-            const data = await response.json();
+            const data = await response.json() as ChatApiResponse;
 
             if (!response.ok) {
                 throw new Error(data.error || 'Errore nella rete');
             }
 
-            // Aggiungiamo la risposta reale generata localmente
             addMessage('assistant', data.content);
         } catch (error) {
             console.error('Chat error:', error);
@@ -180,7 +192,7 @@ export function AiChatSheet() {
                                             <p className="text-sm whitespace-pre-wrap leading-relaxed">{msg.content}</p>
                                         )}
                                         <p className="text-[10px] opacity-70 mt-1 text-right">
-                                            {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                            {formatMessageTime(msg.timestamp)}
                                         </p>
                                     </div>
                                 </div>

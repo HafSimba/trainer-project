@@ -36,6 +36,14 @@ function SheetOverlay({ className, ...props }: SheetPrimitive.Backdrop.Props) {
   )
 }
 
+type SheetSide = "top" | "right" | "bottom" | "left"
+
+type SheetContentProps = SheetPrimitive.Popup.Props & {
+  side?: SheetSide
+  showCloseButton?: boolean
+  hideOverlay?: boolean
+}
+
 function SheetContent({
   className,
   children,
@@ -43,11 +51,7 @@ function SheetContent({
   showCloseButton = true,
   hideOverlay = false,
   ...props
-}: SheetPrimitive.Popup.Props & {
-  side?: "top" | "right" | "bottom" | "left"
-  showCloseButton?: boolean
-  hideOverlay?: boolean
-}) {
+}: SheetContentProps) {
   return (
     <SheetPortal>
       {!hideOverlay && <SheetOverlay />}

@@ -60,6 +60,19 @@ type PlanData = {
     diet_rules?: UserProfile['diet_rules'];
 };
 
+type SafePlanData = {
+    personal_info: UserProfile['personal_info'];
+    targets: UserProfile['targets'];
+    workout_plan: UserProfile['workout_plan'];
+    diet_plan: UserProfile['diet_plan'];
+    diet_rules: UserProfile['diet_rules'];
+    onboarding_input: CanonicalOnboardingInput;
+};
+
+type CanonicalValidationResult =
+    | { ok: true; canonicalInput: CanonicalOnboardingInput }
+    | { ok: false; error: string };
+
 type DetectedRestriction = {
     key: 'gluten_free' | 'lactose_free';
     label: string;
@@ -81,6 +94,10 @@ function parseNumberFromUnknown(value: unknown): number {
 
 function normalizeString(value: unknown): string {
     return typeof value === 'string' ? value.trim() : '';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return !!value && typeof value === 'object';
 }
 
 function normalizeForMatching(value: string): string {
@@ -477,93 +494,95 @@ async function requestPlanPart(prompt: string, label: string): Promise<PlanData>
     throw lastError ?? new Error(`Impossibile generare la sezione ${label}`);
 }
 
-export async function POST(req: Request) {
-    try {
-        const body = await req.json();
-        const username = normalizeString(body.username);
-        const rawGender = normalizeString(body.sesso);
-        const rawLevel = normalizeString(body.livelloAttuale);
-        const rawGoal = normalizeString(body.obiettivoPrimario);
-        const rawTime = normalizeString(body.tempoDisponibile);
-        const rawAvailabilityDays = parseNumberFromUnknown(body.disponibilitaSettimanale);
-        const rawEquipment = normalizeString(body.equipaggiamento);
-        const rawAttitudeRecovery = normalizeString(body.attitudineRecupero) || 'Normale';
-        const rawAttitudeStress = normalizeString(body.attitudineStress) || 'Medio';
-        const rawAttitudeIntensity = normalizeString(body.attitudineIntensita) || 'Bilanciato';
-        const hasFoodRestrictions = body.allergiePresenti === true || normalizeString(body.allergiePresenti).toLowerCase() === 'true';
-        const foodRestrictionsNotes = normalizeString(body.allergieNote);
+function validateAndBuildCanonicalInput(body: unknown): CanonicalValidationResult {
+    const source = isRecord(body) ? body : {};
 
-        const age = parseNumberFromUnknown(body.eta);
-        const heightCm = parseNumberFromUnknown(body.altezzaCm ?? body.altezza);
-        const weightKg = parseNumberFromUnknown(body.pesoKg ?? body.peso);
+    const username = normalizeString(source.username);
+    const rawGender = normalizeString(source.sesso);
+    const rawLevel = normalizeString(source.livelloAttuale);
+    const rawGoal = normalizeString(source.obiettivoPrimario);
+    const rawTime = normalizeString(source.tempoDisponibile);
+    const rawAvailabilityDays = parseNumberFromUnknown(source.disponibilitaSettimanale);
+    const rawEquipment = normalizeString(source.equipaggiamento);
+    const rawAttitudeRecovery = normalizeString(source.attitudineRecupero) || 'Normale';
+    const rawAttitudeStress = normalizeString(source.attitudineStress) || 'Medio';
+    const rawAttitudeIntensity = normalizeString(source.attitudineIntensita) || 'Bilanciato';
+    const hasFoodRestrictions = source.allergiePresenti === true || normalizeString(source.allergiePresenti).toLowerCase() === 'true';
+    const foodRestrictionsNotes = normalizeString(source.allergieNote);
 
-        if (!username) {
-            return NextResponse.json({ error: 'Il campo nome è obbligatorio' }, { status: 400 });
-        }
+    const age = parseNumberFromUnknown(source.eta);
+    const heightCm = parseNumberFromUnknown(source.altezzaCm ?? source.altezza);
+    const weightKg = parseNumberFromUnknown(source.pesoKg ?? source.peso);
 
-        if (!isOneOf(rawGender, ALLOWED_GENDERS)) {
-            return NextResponse.json({ error: 'Valore sesso non valido' }, { status: 400 });
-        }
+    if (!username) {
+        return { ok: false, error: 'Il campo nome è obbligatorio' };
+    }
 
-        if (!isOneOf(rawLevel, ALLOWED_LEVELS)) {
-            return NextResponse.json({ error: 'Valore livelloAttuale non valido' }, { status: 400 });
-        }
+    if (!isOneOf(rawGender, ALLOWED_GENDERS)) {
+        return { ok: false, error: 'Valore sesso non valido' };
+    }
 
-        if (!isOneOf(rawGoal, ALLOWED_GOALS)) {
-            return NextResponse.json({ error: 'Valore obiettivoPrimario non valido' }, { status: 400 });
-        }
+    if (!isOneOf(rawLevel, ALLOWED_LEVELS)) {
+        return { ok: false, error: 'Valore livelloAttuale non valido' };
+    }
 
-        if (rawTime && !isOneOf(rawTime, ALLOWED_TIME)) {
-            return NextResponse.json({ error: 'Valore tempoDisponibile non valido' }, { status: 400 });
-        }
+    if (!isOneOf(rawGoal, ALLOWED_GOALS)) {
+        return { ok: false, error: 'Valore obiettivoPrimario non valido' };
+    }
 
-        if (!isOneOf(rawEquipment, ALLOWED_EQUIPMENT)) {
-            return NextResponse.json({ error: 'Valore equipaggiamento non valido' }, { status: 400 });
-        }
+    if (rawTime && !isOneOf(rawTime, ALLOWED_TIME)) {
+        return { ok: false, error: 'Valore tempoDisponibile non valido' };
+    }
 
-        if (!isOneOf(rawAttitudeRecovery, ALLOWED_ATTITUDE_RECOVERY)) {
-            return NextResponse.json({ error: 'Valore attitudineRecupero non valido' }, { status: 400 });
-        }
+    if (!isOneOf(rawEquipment, ALLOWED_EQUIPMENT)) {
+        return { ok: false, error: 'Valore equipaggiamento non valido' };
+    }
 
-        if (!isOneOf(rawAttitudeStress, ALLOWED_ATTITUDE_STRESS)) {
-            return NextResponse.json({ error: 'Valore attitudineStress non valido' }, { status: 400 });
-        }
+    if (!isOneOf(rawAttitudeRecovery, ALLOWED_ATTITUDE_RECOVERY)) {
+        return { ok: false, error: 'Valore attitudineRecupero non valido' };
+    }
 
-        if (!isOneOf(rawAttitudeIntensity, ALLOWED_ATTITUDE_INTENSITY)) {
-            return NextResponse.json({ error: 'Valore attitudineIntensita non valido' }, { status: 400 });
-        }
+    if (!isOneOf(rawAttitudeStress, ALLOWED_ATTITUDE_STRESS)) {
+        return { ok: false, error: 'Valore attitudineStress non valido' };
+    }
 
-        if (!Number.isFinite(age) || age < 14 || age > 90) {
-            return NextResponse.json({ error: 'Età non valida' }, { status: 400 });
-        }
+    if (!isOneOf(rawAttitudeIntensity, ALLOWED_ATTITUDE_INTENSITY)) {
+        return { ok: false, error: 'Valore attitudineIntensita non valido' };
+    }
 
-        if (!Number.isFinite(heightCm) || heightCm < 100 || heightCm > 250) {
-            return NextResponse.json({ error: 'Altezza non valida' }, { status: 400 });
-        }
+    if (!Number.isFinite(age) || age < 14 || age > 90) {
+        return { ok: false, error: 'Età non valida' };
+    }
 
-        if (!Number.isFinite(weightKg) || weightKg < 30 || weightKg > 250) {
-            return NextResponse.json({ error: 'Peso non valido' }, { status: 400 });
-        }
+    if (!Number.isFinite(heightCm) || heightCm < 100 || heightCm > 250) {
+        return { ok: false, error: 'Altezza non valida' };
+    }
 
-        let availableDays = Number.isFinite(rawAvailabilityDays) ? Math.round(rawAvailabilityDays) : NaN;
-        if (!Number.isFinite(availableDays) && rawTime) {
-            const availableDaysMatch = rawTime.match(/\d+/);
-            availableDays = availableDaysMatch ? Number(availableDaysMatch[0]) : NaN;
-        }
+    if (!Number.isFinite(weightKg) || weightKg < 30 || weightKg > 250) {
+        return { ok: false, error: 'Peso non valido' };
+    }
 
-        if (!Number.isFinite(availableDays) || availableDays < 1 || availableDays > 7) {
-            return NextResponse.json({ error: 'Numero giorni settimanali non valido' }, { status: 400 });
-        }
+    let availableDays = Number.isFinite(rawAvailabilityDays) ? Math.round(rawAvailabilityDays) : NaN;
+    if (!Number.isFinite(availableDays) && rawTime) {
+        const availableDaysMatch = rawTime.match(/\d+/);
+        availableDays = availableDaysMatch ? Number(availableDaysMatch[0]) : NaN;
+    }
 
-        if (hasFoodRestrictions && !foodRestrictionsNotes) {
-            return NextResponse.json({ error: 'Specifica le allergie o i casi alimentari indicati' }, { status: 400 });
-        }
+    if (!Number.isFinite(availableDays) || availableDays < 1 || availableDays > 7) {
+        return { ok: false, error: 'Numero giorni settimanali non valido' };
+    }
 
-        const availableDaysLabel = isOneOf(rawTime, ALLOWED_TIME)
-            ? rawTime
-            : `${availableDays} ${availableDays === 1 ? 'giorno' : 'giorni'}/sett.`;
+    if (hasFoodRestrictions && !foodRestrictionsNotes) {
+        return { ok: false, error: 'Specifica le allergie o i casi alimentari indicati' };
+    }
 
-        const canonicalInput: CanonicalOnboardingInput = {
+    const availableDaysLabel = isOneOf(rawTime, ALLOWED_TIME)
+        ? rawTime
+        : `${availableDays} ${availableDays === 1 ? 'giorno' : 'giorni'}/sett.`;
+
+    return {
+        ok: true,
+        canonicalInput: {
             name: username,
             age,
             gender: rawGender,
@@ -580,36 +599,39 @@ export async function POST(req: Request) {
             food_restrictions_notes: foodRestrictionsNotes,
             equipment: rawEquipment,
             submitted_at: new Date().toISOString(),
-        };
+        },
+    };
+}
 
-        const restrictionPromptHint = buildRestrictionPromptHint(canonicalInput);
+function buildCommonContext(input: CanonicalOnboardingInput): string {
+    return `Nome: ${input.name}
+Età: ${input.age}
+Sesso: ${input.gender}
+Altezza: ${input.height_cm} cm
+Peso: ${input.weight_kg} kg
+Disponibilità settimanale: ${input.available_days_per_week} giorni/sett.
+Recupero: ${input.attitude_recovery}
+Stress quotidiano: ${input.attitude_stress}
+Propensione intensità: ${input.attitude_intensity}
+Livello: ${input.level}
+Obiettivo: ${input.goal}
+Tempo disponibile: ${input.available_days_per_week} giorni/sett. (${input.available_days_label})
+Restrizioni alimentari/allergie: ${input.has_food_restrictions ? input.food_restrictions_notes : 'Nessuna dichiarata'}
+Equipaggiamento: ${input.equipment}`;
+}
 
-        const commonContext = `Nome: ${canonicalInput.name}
-Età: ${canonicalInput.age}
-Sesso: ${canonicalInput.gender}
-Altezza: ${canonicalInput.height_cm} cm
-Peso: ${canonicalInput.weight_kg} kg
-Disponibilità settimanale: ${canonicalInput.available_days_per_week} giorni/sett.
-Recupero: ${canonicalInput.attitude_recovery}
-Stress quotidiano: ${canonicalInput.attitude_stress}
-Propensione intensità: ${canonicalInput.attitude_intensity}
-Livello: ${canonicalInput.level}
-Obiettivo: ${canonicalInput.goal}
-Tempo disponibile: ${canonicalInput.available_days_per_week} giorni/sett. (${canonicalInput.available_days_label})
-Restrizioni alimentari/allergie: ${canonicalInput.has_food_restrictions ? canonicalInput.food_restrictions_notes : 'Nessuna dichiarata'}
-Equipaggiamento: ${canonicalInput.equipment}`;
-
-        const workoutPrompt = `Sei un AI Personal Trainer esperto.
+function buildWorkoutPrompt(input: CanonicalOnboardingInput, commonContext: string): string {
+    return `Sei un AI Personal Trainer esperto.
 Genera SOLO la parte di allenamento e i target calorici/macros per questo utente:
 ${commonContext}
 
 REGOLE TASSATIVE:
-1. Il NUMERO DI GIORNI di allenamento ("schedule") DEVE essere ESATTAMENTE ${canonicalInput.available_days_per_week}.
+1. Il NUMERO DI GIORNI di allenamento ("schedule") DEVE essere ESATTAMENTE ${input.available_days_per_week}.
 2. In "personal_info" usa ESATTAMENTE questi dati e non modificarli:
-    - age: ${canonicalInput.age}
-    - gender: "${canonicalInput.gender}"
-    - height_cm: ${canonicalInput.height_cm}
-    - weight_kg: ${canonicalInput.weight_kg}
+    - age: ${input.age}
+    - gender: "${input.gender}"
+    - height_cm: ${input.height_cm}
+    - weight_kg: ${input.weight_kg}
 3. L'output deve essere SOLO E UNICAMENTE un JSON valido (privo di markdown addizionali come \`\`\`json).
 
 STRUTTURA JSON DA RISPETTARE:
@@ -625,15 +647,17 @@ STRUTTURA JSON DA RISPETTARE:
     }
 }
 NON RESTITUIRE NULL'ALTRO OLTRE L'OGGETTO JSON.`;
+}
 
-        const dietPrompt = `Sei un AI Nutrizionista esperto.
+function buildDietPrompt(input: CanonicalOnboardingInput, commonContext: string, restrictionPromptHint: string): string {
+    return `Sei un AI Nutrizionista esperto.
 Genera SOLO la scheda alimentare completa della settimana per questo utente:
 ${commonContext}
 
 REGOLE TASSATIVE:
 1. "diet_plan.weekly_schedule" DEVE contenere ESATTAMENTE 7 giorni (da Lunedì a Domenica), indicando per ogni pasto gli alimenti esatti con la quantità in g/ml. Esempio pasto: ["50g Avena", "200ml Latte"].
 2. L'output deve essere SOLO E UNICAMENTE un JSON valido (privo di markdown addizionali come \`\`\`json).
-3. ${canonicalInput.has_food_restrictions ? `ESCLUDI COMPLETAMENTE questi alimenti/condizioni: ${canonicalInput.food_restrictions_notes}.` : 'Se non ci sono allergie dichiarate, mantieni il piano alimentare standard bilanciato.'}
+3. ${input.has_food_restrictions ? `ESCLUDI COMPLETAMENTE questi alimenti/condizioni: ${input.food_restrictions_notes}.` : 'Se non ci sono allergie dichiarate, mantieni il piano alimentare standard bilanciato.'}
 4. ${restrictionPromptHint}
 
 STRUTTURA JSON DA RISPETTARE:
@@ -654,6 +678,124 @@ STRUTTURA JSON DA RISPETTARE:
     "diet_rules": { "meal_timing": "3 pasti", "preferred_foods": ["riso", "pollo"], "forbidden_foods": ["fritto"] }
 }
 NON RESTITUIRE NULL'ALTRO OLTRE L'OGGETTO JSON.`;
+}
+
+function buildSafePlanData(
+    planData: Required<PlanData>,
+    fallbackPlan: Required<PlanData>,
+    canonicalInput: CanonicalOnboardingInput
+): SafePlanData {
+    const personalInfoSource = planData.personal_info && typeof planData.personal_info === 'object'
+        ? planData.personal_info
+        : {};
+    const rawActivityLevel = normalizeString((personalInfoSource as Record<string, unknown>).activity_level);
+    const activityLevel = isOneOf(rawActivityLevel, ALLOWED_ACTIVITY_LEVELS)
+        ? rawActivityLevel
+        : fallbackPlan.personal_info.activity_level;
+
+    const sanitizedDietPlan = sanitizeDietPlan(planData.diet_plan, fallbackPlan.diet_plan);
+    const dietPlanWithRestrictions = enforceDietaryRestrictionsOnDietPlan(sanitizedDietPlan, canonicalInput);
+    const sanitizedDietRules = sanitizeDietRules(planData.diet_rules, fallbackPlan.diet_rules);
+    const dietRulesWithRestrictions = mergeFoodRestrictionsIntoDietRules(sanitizedDietRules, canonicalInput);
+
+    return {
+        personal_info: {
+            age: canonicalInput.age,
+            gender: toProfileGender(canonicalInput.gender),
+            height_cm: canonicalInput.height_cm,
+            weight_kg: canonicalInput.weight_kg,
+            activity_level: activityLevel,
+        },
+        targets: sanitizeTargets(planData.targets, fallbackPlan.targets),
+        workout_plan: sanitizeWorkoutPlan(planData.workout_plan, fallbackPlan.workout_plan),
+        diet_plan: dietPlanWithRestrictions,
+        diet_rules: dietRulesWithRestrictions,
+        onboarding_input: canonicalInput,
+    };
+}
+
+async function saveUserProfile(canonicalInput: CanonicalOnboardingInput, safePlanData: SafePlanData) {
+    const mongoClient = await clientPromise;
+    const db = mongoClient.db('trainer_db');
+    const userProfiles = db.collection<UserProfile>('user_profiles');
+
+    await userProfiles.updateMany(
+        {
+            $or: [
+                { etaGenere: { $exists: true } },
+                { 'onboarding_input.etaGenere': { $exists: true } },
+            ],
+        },
+        {
+            $unset: {
+                etaGenere: '',
+                'onboarding_input.etaGenere': '',
+            },
+        }
+    );
+
+    const userProfile = {
+        userId: PROTOTYPE_USER_ID,
+        name: canonicalInput.name || 'Utente',
+        ...safePlanData,
+    };
+
+    return userProfiles.findOneAndUpdate(
+        { userId: PROTOTYPE_USER_ID },
+        {
+            $set: userProfile,
+            $unset: {
+                etaGenere: '',
+            },
+        },
+        { upsert: true, returnDocument: 'after' }
+    );
+}
+
+function extractErrorDetails(error: unknown) {
+    if (error instanceof Error) {
+        const errorObject = error as Error & { code?: string | number; type?: string; status?: number };
+        return {
+            message: error.message || 'Errore sconosciuto',
+            code: errorObject.code,
+            type: errorObject.type,
+            status: errorObject.status,
+        };
+    }
+
+    if (error && typeof error === 'object') {
+        const record = error as Record<string, unknown>;
+        return {
+            message: typeof record.message === 'string' ? record.message : 'Errore sconosciuto',
+            code: typeof record.code === 'string' || typeof record.code === 'number' ? record.code : undefined,
+            type: typeof record.type === 'string' ? record.type : undefined,
+            status: typeof record.status === 'number' ? record.status : undefined,
+        };
+    }
+
+    return {
+        message: 'Errore sconosciuto',
+        code: undefined,
+        type: undefined,
+        status: undefined,
+    };
+}
+
+export async function POST(req: Request) {
+    try {
+        const body = await req.json();
+        const validation = validateAndBuildCanonicalInput(body);
+
+        if (!validation.ok) {
+            return NextResponse.json({ error: validation.error }, { status: 400 });
+        }
+
+        const canonicalInput = validation.canonicalInput;
+
+        const restrictionPromptHint = buildRestrictionPromptHint(canonicalInput);
+        const commonContext = buildCommonContext(canonicalInput);
+        const workoutPrompt = buildWorkoutPrompt(canonicalInput, commonContext);
+        const dietPrompt = buildDietPrompt(canonicalInput, commonContext, restrictionPromptHint);
 
         const fallbackPlan = buildFallbackPlan(canonicalInput);
 
@@ -692,79 +834,13 @@ NON RESTITUIRE NULL'ALTRO OLTRE L'OGGETTO JSON.`;
             ...dietData,
         };
 
-        const personalInfoSource = planData.personal_info && typeof planData.personal_info === 'object'
-            ? planData.personal_info
-            : {};
-        const rawActivityLevel = normalizeString((personalInfoSource as Record<string, unknown>).activity_level);
-        const activityLevel = isOneOf(rawActivityLevel, ALLOWED_ACTIVITY_LEVELS)
-            ? rawActivityLevel
-            : fallbackPlan.personal_info.activity_level;
-
-        const sanitizedDietPlan = sanitizeDietPlan(planData.diet_plan, fallbackPlan.diet_plan);
-        const dietPlanWithRestrictions = enforceDietaryRestrictionsOnDietPlan(sanitizedDietPlan, canonicalInput);
-        const sanitizedDietRules = sanitizeDietRules(planData.diet_rules, fallbackPlan.diet_rules);
-        const dietRulesWithRestrictions = mergeFoodRestrictionsIntoDietRules(sanitizedDietRules, canonicalInput);
-
-        const safePlanData = {
-            personal_info: {
-                age: canonicalInput.age,
-                gender: toProfileGender(canonicalInput.gender),
-                height_cm: canonicalInput.height_cm,
-                weight_kg: canonicalInput.weight_kg,
-                activity_level: activityLevel,
-            },
-            targets: sanitizeTargets(planData.targets, fallbackPlan.targets),
-            workout_plan: sanitizeWorkoutPlan(planData.workout_plan, fallbackPlan.workout_plan),
-            diet_plan: dietPlanWithRestrictions,
-            diet_rules: dietRulesWithRestrictions,
-            onboarding_input: canonicalInput,
-        };
-
-        const mongoClient = await clientPromise;
-        const db = mongoClient.db('trainer_db');
-        const userProfiles = db.collection<UserProfile>('user_profiles');
-
-        await userProfiles.updateMany(
-            {
-                $or: [
-                    { etaGenere: { $exists: true } },
-                    { 'onboarding_input.etaGenere': { $exists: true } },
-                ],
-            },
-            {
-                $unset: {
-                    etaGenere: '',
-                    'onboarding_input.etaGenere': '',
-                },
-            }
-        );
-
-        const userProfile = {
-            userId: PROTOTYPE_USER_ID,
-            name: canonicalInput.name || 'Utente',
-            ...safePlanData
-        };
-
-        const result = await userProfiles.findOneAndUpdate(
-            { userId: PROTOTYPE_USER_ID },
-            {
-                $set: userProfile,
-                $unset: {
-                    etaGenere: '',
-                },
-            },
-            { upsert: true, returnDocument: 'after' }
-        );
+        const safePlanData = buildSafePlanData(planData, fallbackPlan, canonicalInput);
+        const result = await saveUserProfile(canonicalInput, safePlanData);
 
         return NextResponse.json({ success: true, profile: result });
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("Errore Gen AI:", error);
-        const details = {
-            message: error?.message || 'Errore sconosciuto',
-            code: error?.code,
-            type: error?.type,
-            status: error?.status,
-        };
+        const details = extractErrorDetails(error);
         return NextResponse.json(
             {
                 error: 'Errore durante la generazione del piano con IA',
