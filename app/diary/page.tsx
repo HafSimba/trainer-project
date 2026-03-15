@@ -12,7 +12,7 @@ import { BarcodeScanner } from "@/components/BarcodeScanner";
 import { v4 as uuidv4 } from "uuid";
 
 const PROTOTYPE_USER_ID = "tester-user-123";
-const DAILY_CALORIE_GOAL = 2400;
+const DEFAULT_DAILY_CALORIE_GOAL = 2400;
 
 type MealType = 'colazione' | 'pranzo' | 'cena' | 'snack';
 
@@ -20,6 +20,7 @@ export default function Diary() {
   const [log, setLog] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [waterGlasses, setWaterGlasses] = useState(0);
+  const [dailyCalorieGoal, setDailyCalorieGoal] = useState(DEFAULT_DAILY_CALORIE_GOAL);
 
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [selectedMealType, setSelectedMealType] = useState<MealType>('colazione');
@@ -42,8 +43,23 @@ export default function Diary() {
     setIsLoading(true);
     try {
       const today = new Date().toISOString().split('T')[0];
-      const res = await fetch('/api/logs?userId=' + PROTOTYPE_USER_ID + '&date=' + today);
-      const data = await res.json();
+      const [res, profileRes] = await Promise.all([
+        fetch('/api/logs?userId=' + PROTOTYPE_USER_ID + '&date=' + today),
+        fetch('/api/profile?userId=' + PROTOTYPE_USER_ID)
+      ]);
+
+      const [data, profileData] = await Promise.all([
+        res.json(),
+        profileRes.json()
+      ]);
+
+      const profileCalories = Number(profileData?.targets?.daily_calories);
+      if (Number.isFinite(profileCalories) && profileCalories > 0) {
+        setDailyCalorieGoal(Math.round(profileCalories));
+      } else {
+        setDailyCalorieGoal(DEFAULT_DAILY_CALORIE_GOAL);
+      }
+
       if (data && data.daily_nutrition_summary) {
         setLog(data);
         setWaterGlasses(Math.floor((data.daily_nutrition_summary.water_intake_ml || 0) / 250));
@@ -121,6 +137,7 @@ export default function Diary() {
     total_carbs_g: Math.max(0, rawSummary.total_carbs_g || 0),
     total_fats_g: Math.max(0, rawSummary.total_fats_g || 0)
   };
+  const calorieProgress = Math.min((summary.total_calories / dailyCalorieGoal) * 100, 100);
   const meals = log?.meals_log || [];
   const pieData = [
     { name: 'Carboidrati', value: summary.total_carbs_g * 4, color: '#3b82f6' },
@@ -258,9 +275,9 @@ export default function Diary() {
             <div>
               <div className="flex justify-between text-xs mb-1">
                 <span className="font-semibold">Calorie Totali</span>
-                <span className="text-gray-500">{Math.round(summary.total_calories)} / {DAILY_CALORIE_GOAL} kcal</span>
+                <span className="text-gray-500">{Math.round(summary.total_calories)} / {dailyCalorieGoal} kcal</span>
               </div>
-              <Progress value={(summary.total_calories / DAILY_CALORIE_GOAL) * 100} className="h-2" />
+              <Progress value={calorieProgress} className="h-2" />
             </div>
             <div className="grid grid-cols-3 gap-1 text-[10px] text-center mt-2">
               <div className="flex flex-col"><span className="text-blue-500 font-bold">{summary.total_carbs_g ? Math.round(summary.total_carbs_g) : 0}g</span>Carbo</div>

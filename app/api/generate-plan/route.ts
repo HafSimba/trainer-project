@@ -60,6 +60,15 @@ type PlanData = {
     diet_rules?: UserProfile['diet_rules'];
 };
 
+type DetectedRestriction = {
+    key: 'gluten_free' | 'lactose_free';
+    label: string;
+    forbiddenKeywords: string[];
+    replacements: Array<[string, string]>;
+    promptHint: string;
+    fallbackFood: string;
+};
+
 function parseNumberFromUnknown(value: unknown): number {
     if (typeof value === 'number') return value;
     if (typeof value === 'string') {
@@ -72,6 +81,20 @@ function parseNumberFromUnknown(value: unknown): number {
 
 function normalizeString(value: unknown): string {
     return typeof value === 'string' ? value.trim() : '';
+}
+
+function normalizeForMatching(value: string): string {
+    return value
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function escapeRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function isOneOf<T extends readonly string[]>(value: string, options: T): value is T[number] {
@@ -275,6 +298,162 @@ function sanitizeDietRules(candidate: unknown, fallback: UserProfile['diet_rules
     };
 }
 
+function detectDietaryRestrictions(restrictionNotes: string): DetectedRestriction[] {
+    const normalizedNotes = normalizeForMatching(restrictionNotes);
+    const detected: DetectedRestriction[] = [];
+
+    const hasGlutenRestriction = /\b(celiachia|celiaco|celiaca|glutine|gluten|senza glutine|no glutine)\b/.test(normalizedNotes);
+    if (hasGlutenRestriction) {
+        detected.push({
+            key: 'gluten_free',
+            label: 'senza glutine (celiachia)',
+            forbiddenKeywords: [
+                'pane', 'pasta', 'farro', 'orzo', 'segale', 'couscous', 'seitan', 'fette biscottate',
+                'pizza', 'panino', 'birra', 'frumento', 'grano', 'semola', 'bulgur'
+            ],
+            replacements: [
+                ['fette biscottate', 'fette biscottate senza glutine'],
+                ['pane', 'pane senza glutine'],
+                ['pasta', 'pasta senza glutine'],
+                ['farro', 'quinoa'],
+                ['orzo', 'riso'],
+                ['segale', 'riso'],
+                ['couscous', 'quinoa'],
+                ['seitan', 'tofu'],
+                ['pizza', 'pizza senza glutine'],
+                ['panino', 'panino senza glutine'],
+                ['birra', 'bevanda analcolica senza glutine'],
+                ['frumento', 'riso'],
+                ['grano', 'riso'],
+                ['semola', 'riso'],
+                ['bulgur', 'riso'],
+            ],
+            promptHint: 'Se l’utente è celiaco o richiede senza glutine, non usare alimenti con glutine (frumento, orzo, segale, farro, couscous, pane/pasta tradizionali, seitan). Usa solo alternative senza glutine.',
+            fallbackFood: 'Riso o quinoa con proteina magra (senza glutine)',
+        });
+    }
+
+    const hasLactoseRestriction = /\b(lattosio|senza lattosio|no lattosio)\b/.test(normalizedNotes);
+    if (hasLactoseRestriction) {
+        detected.push({
+            key: 'lactose_free',
+            label: 'senza lattosio',
+            forbiddenKeywords: ['latte', 'yogurt', 'formaggio', 'burro', 'ricotta', 'mozzarella', 'parmigiano', 'whey'],
+            replacements: [
+                ['latte', 'bevanda vegetale senza zuccheri'],
+                ['yogurt', 'yogurt senza lattosio'],
+                ['formaggio', 'formaggio senza lattosio'],
+                ['burro', 'olio evo'],
+                ['ricotta', 'ricotta senza lattosio'],
+                ['mozzarella', 'mozzarella senza lattosio'],
+                ['parmigiano', 'formaggio stagionato senza lattosio'],
+                ['whey', 'proteine isolate senza lattosio'],
+            ],
+            promptHint: 'Se l’utente è intollerante al lattosio, evita latte e derivati con lattosio e usa equivalenti senza lattosio o vegetali.',
+            fallbackFood: 'Alternativa senza lattosio con fonte proteica magra',
+        });
+    }
+
+    return detected;
+}
+
+function applyReplacementsToMealItem(mealItem: string, replacements: Array<[string, string]>): string {
+    let nextItem = mealItem;
+    for (const [source, target] of replacements) {
+        const pattern = new RegExp(`\\b${escapeRegExp(source)}\\b`, 'gi');
+        nextItem = nextItem.replace(pattern, target);
+    }
+    return nextItem;
+}
+
+function containsForbiddenKeyword(value: string, forbiddenKeywords: string[]): boolean {
+    const normalizedValue = normalizeForMatching(value);
+    return forbiddenKeywords.some((keyword) => normalizedValue.includes(normalizeForMatching(keyword)));
+}
+
+function sanitizeMealListByRestrictions(mealItems: string[], restrictions: DetectedRestriction[]): string[] {
+    return mealItems.map((mealItem) => {
+        let nextMealItem = mealItem;
+
+        for (const restriction of restrictions) {
+            nextMealItem = applyReplacementsToMealItem(nextMealItem, restriction.replacements);
+            if (containsForbiddenKeyword(nextMealItem, restriction.forbiddenKeywords)) {
+                nextMealItem = `${restriction.fallbackFood}`;
+            }
+        }
+
+        return nextMealItem;
+    });
+}
+
+function enforceDietaryRestrictionsOnDietPlan(
+    dietPlan: UserProfile['diet_plan'],
+    input: CanonicalOnboardingInput
+): UserProfile['diet_plan'] {
+    if (!input.has_food_restrictions) return dietPlan;
+
+    const detectedRestrictions = detectDietaryRestrictions(input.food_restrictions_notes);
+    if (detectedRestrictions.length === 0) return dietPlan;
+
+    return {
+        weekly_schedule: dietPlan.weekly_schedule.map((day) => ({
+            ...day,
+            meals: {
+                colazione: sanitizeMealListByRestrictions(day.meals.colazione, detectedRestrictions),
+                pranzo: sanitizeMealListByRestrictions(day.meals.pranzo, detectedRestrictions),
+                cena: sanitizeMealListByRestrictions(day.meals.cena, detectedRestrictions),
+                snack: sanitizeMealListByRestrictions(day.meals.snack, detectedRestrictions),
+            },
+        })),
+    };
+}
+
+function buildRestrictionPromptHint(input: CanonicalOnboardingInput): string {
+    if (!input.has_food_restrictions) return 'Nessuna restrizione alimentare aggiuntiva.';
+
+    const detectedRestrictions = detectDietaryRestrictions(input.food_restrictions_notes);
+    if (detectedRestrictions.length === 0) {
+        return `Rispetta rigorosamente questa restrizione indicata dall'utente: ${input.food_restrictions_notes}.`;
+    }
+
+    return detectedRestrictions.map((restriction) => restriction.promptHint).join(' ');
+}
+
+function mergeFoodRestrictionsIntoDietRules(
+    rules: UserProfile['diet_rules'],
+    input: CanonicalOnboardingInput
+): UserProfile['diet_rules'] {
+    if (!input.has_food_restrictions) return rules;
+
+    const normalizedRestriction = normalizeString(input.food_restrictions_notes);
+    if (!normalizedRestriction) return rules;
+
+    const forbiddenFoods = Array.isArray(rules.forbidden_foods) ? [...rules.forbidden_foods] : [];
+    const alreadyPresent = forbiddenFoods.some((item) => normalizeString(item).toLowerCase() === normalizedRestriction.toLowerCase());
+    if (!alreadyPresent) {
+        forbiddenFoods.push(normalizedRestriction);
+    }
+
+    const detectedRestrictions = detectDietaryRestrictions(normalizedRestriction);
+    for (const restriction of detectedRestrictions) {
+        for (const keyword of restriction.forbiddenKeywords) {
+            const exists = forbiddenFoods.some((item) => normalizeForMatching(item) === normalizeForMatching(keyword));
+            if (!exists) {
+                forbiddenFoods.push(keyword);
+            }
+        }
+    }
+
+    const restrictionNote = `Restrizioni alimentari obbligatorie: ${normalizedRestriction}`;
+    const customNotes = [normalizeString(rules.custom_notes), restrictionNote].filter(Boolean).join(' | ');
+
+    return {
+        ...rules,
+        forbidden_foods: forbiddenFoods,
+        custom_notes: customNotes,
+    };
+}
+
 async function requestPlanPart(prompt: string, label: string): Promise<PlanData> {
     let lastError: unknown = null;
 
@@ -403,6 +582,8 @@ export async function POST(req: Request) {
             submitted_at: new Date().toISOString(),
         };
 
+        const restrictionPromptHint = buildRestrictionPromptHint(canonicalInput);
+
         const commonContext = `Nome: ${canonicalInput.name}
 Età: ${canonicalInput.age}
 Sesso: ${canonicalInput.gender}
@@ -453,6 +634,7 @@ REGOLE TASSATIVE:
 1. "diet_plan.weekly_schedule" DEVE contenere ESATTAMENTE 7 giorni (da Lunedì a Domenica), indicando per ogni pasto gli alimenti esatti con la quantità in g/ml. Esempio pasto: ["50g Avena", "200ml Latte"].
 2. L'output deve essere SOLO E UNICAMENTE un JSON valido (privo di markdown addizionali come \`\`\`json).
 3. ${canonicalInput.has_food_restrictions ? `ESCLUDI COMPLETAMENTE questi alimenti/condizioni: ${canonicalInput.food_restrictions_notes}.` : 'Se non ci sono allergie dichiarate, mantieni il piano alimentare standard bilanciato.'}
+4. ${restrictionPromptHint}
 
 STRUTTURA JSON DA RISPETTARE:
 {
@@ -518,6 +700,11 @@ NON RESTITUIRE NULL'ALTRO OLTRE L'OGGETTO JSON.`;
             ? rawActivityLevel
             : fallbackPlan.personal_info.activity_level;
 
+        const sanitizedDietPlan = sanitizeDietPlan(planData.diet_plan, fallbackPlan.diet_plan);
+        const dietPlanWithRestrictions = enforceDietaryRestrictionsOnDietPlan(sanitizedDietPlan, canonicalInput);
+        const sanitizedDietRules = sanitizeDietRules(planData.diet_rules, fallbackPlan.diet_rules);
+        const dietRulesWithRestrictions = mergeFoodRestrictionsIntoDietRules(sanitizedDietRules, canonicalInput);
+
         const safePlanData = {
             personal_info: {
                 age: canonicalInput.age,
@@ -528,8 +715,8 @@ NON RESTITUIRE NULL'ALTRO OLTRE L'OGGETTO JSON.`;
             },
             targets: sanitizeTargets(planData.targets, fallbackPlan.targets),
             workout_plan: sanitizeWorkoutPlan(planData.workout_plan, fallbackPlan.workout_plan),
-            diet_plan: sanitizeDietPlan(planData.diet_plan, fallbackPlan.diet_plan),
-            diet_rules: sanitizeDietRules(planData.diet_rules, fallbackPlan.diet_rules),
+            diet_plan: dietPlanWithRestrictions,
+            diet_rules: dietRulesWithRestrictions,
             onboarding_input: canonicalInput,
         };
 

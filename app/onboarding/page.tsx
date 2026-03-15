@@ -77,7 +77,7 @@ export default function Onboarding() {
         livelloAttualeIndex: 1,
         obiettivoPrimarioIndex: 0,
         equipaggiamentoIndex: 1,
-        allergiePresenti: false,
+        allergieScelta: '',
         allergieNote: ''
     });
 
@@ -118,7 +118,11 @@ export default function Onboarding() {
             }
         }
 
-        if (currentStep === 3 && formData.allergiePresenti && !formData.allergieNote.trim()) {
+        if (currentStep === 3 && !formData.allergieScelta) {
+            return 'Rispondi alla domanda su allergie/casi alimentari specifici (Sì o No).';
+        }
+
+        if (currentStep === 3 && formData.allergieScelta === 'presenti' && !formData.allergieNote.trim()) {
             return 'Se hai indicato allergie o casi specifici, inserisci i dettagli alimentari.';
         }
 
@@ -185,7 +189,7 @@ export default function Onboarding() {
                 obiettivoPrimario: GOAL_OPTIONS[formData.obiettivoPrimarioIndex],
                 tempoDisponibile: WEEKLY_AVAILABILITY_OPTIONS[formData.disponibilitaSettimanaleIndex],
                 equipaggiamento: EQUIPMENT_OPTIONS[formData.equipaggiamentoIndex],
-                allergiePresenti: formData.allergiePresenti,
+                allergiePresenti: formData.allergieScelta === 'presenti',
                 allergieNote: formData.allergieNote.trim()
             };
 
@@ -369,34 +373,34 @@ export default function Onboarding() {
 
                                 <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
                                     <div>
-                                        <p className="font-semibold text-gray-900">Allergie o casi alimentari specifici</p>
-                                        <p className="text-xs text-gray-500 mt-1">Questa informazione viene passata all'AI per costruire un piano nutrizionale sicuro e aderente.</p>
+                                        <p className="font-semibold text-gray-900">Hai allergie o casi alimentari specifici?</p>
+                                        <p className="text-xs text-gray-500 mt-1">Esempi: celiachia, intolleranza al lattosio, allergia a frutta secca. Questo dato è usato direttamente dall'AI nel piano alimentare.</p>
                                     </div>
 
                                     <div className="grid grid-cols-2 gap-2">
                                         <button
                                             type="button"
-                                            onClick={() => setFormData({ ...formData, allergiePresenti: false, allergieNote: '' })}
-                                            className={`h-10 rounded-lg border text-sm font-medium transition-colors ${!formData.allergiePresenti
+                                            onClick={() => setFormData({ ...formData, allergieScelta: 'nessuna', allergieNote: '' })}
+                                            className={`h-10 rounded-lg border text-sm font-medium transition-colors ${formData.allergieScelta === 'nessuna'
                                                 ? 'bg-blue-600 text-white border-blue-600'
                                                 : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
                                                 }`}
                                         >
-                                            Nessuna
+                                            No
                                         </button>
                                         <button
                                             type="button"
-                                            onClick={() => setFormData({ ...formData, allergiePresenti: true })}
-                                            className={`h-10 rounded-lg border text-sm font-medium transition-colors ${formData.allergiePresenti
+                                            onClick={() => setFormData({ ...formData, allergieScelta: 'presenti' })}
+                                            className={`h-10 rounded-lg border text-sm font-medium transition-colors ${formData.allergieScelta === 'presenti'
                                                 ? 'bg-blue-600 text-white border-blue-600'
                                                 : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
                                                 }`}
                                         >
-                                            Presenti
+                                            Sì
                                         </button>
                                     </div>
 
-                                    {formData.allergiePresenti && (
+                                    {formData.allergieScelta === 'presenti' && (
                                         <div className="space-y-1">
                                             <label className="text-sm font-semibold block">Dettagli alimentari</label>
                                             <Input
