@@ -56,13 +56,13 @@ function getErrorMessage(error: unknown): string {
 }
 
 function parseJsonSafe<T>(text: string): T | null {
-        if (!text) return null;
+    if (!text) return null;
 
-        try {
-                return JSON.parse(text) as T;
-        } catch {
-                return null;
-        }
+    try {
+        return JSON.parse(text) as T;
+    } catch {
+        return null;
+    }
 }
 
 function normalizeDetectedBarcode(rawValue: string): string {
