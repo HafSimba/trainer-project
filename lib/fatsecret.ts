@@ -2,6 +2,8 @@ import { createHmac, randomBytes } from 'node:crypto';
 
 const FAT_SECRET_OAUTH_URL = 'https://oauth.fatsecret.com/connect/token';
 const FAT_SECRET_API_BASE_URL = 'https://platform.fatsecret.com/rest';
+const FAT_SECRET_METHOD_API_URL = 'https://platform.fatsecret.com/rest/server.api';
+const OPEN_FOOD_FACTS_BASE_URL = 'https://world.openfoodfacts.org';
 const TOKEN_EXPIRY_BUFFER_MS = 60_000;
 const OAUTH1_SIGNATURE_METHOD = 'HMAC-SHA1';
 const OAUTH1_VERSION = '1.0';
@@ -43,6 +45,23 @@ type FatSecretRawFood = {
     servings?: {
         serving?: FatSecretRawServing | FatSecretRawServing[];
     };
+};
+
+type OpenFoodFactsNutriments = {
+    'energy-kcal_100g'?: number | string;
+    'energy-kcal'?: number | string;
+    energy_100g?: number | string;
+    proteins_100g?: number | string;
+    carbohydrates_100g?: number | string;
+    fat_100g?: number | string;
+};
+
+type OpenFoodFactsProduct = {
+    code?: string;
+    _id?: string;
+    product_name?: string;
+    brands?: string;
+    nutriments?: OpenFoodFactsNutriments;
 };
 
 export type FatSecretProduct = {
@@ -247,6 +266,18 @@ function parseFatSecretResponseBody(text: string, context: string): unknown {
     }
 }
 
+function isNonJsonFatSecretError(error: unknown): boolean {
+    return error instanceof Error && error.message.includes('Risposta non JSON da FatSecret');
+}
+
+function mapPathToOAuth1Method(path: string): string | null {
+    if (path === '/foods/search/v1') return 'foods.search';
+    if (path === '/foods/search/v5') return 'foods.search.v5';
+    if (path === '/food/v5') return 'food.get.v5';
+    if (path === '/food/barcode/find-by-id/v1') return 'food.find_id_for_barcode';
+    return null;
+}
+
 async function requestToken(scope: string): Promise<TokenCache> {
     const normalizedScope = normalizeScope(scope);
     const { clientId, clientSecret } = getFatSecretOAuth2Credentials();
@@ -323,20 +354,26 @@ function buildOAuth1Signature(
     return createHmac('sha1', signingKey).update(signatureBaseString).digest('base64');
 }
 
-async function fatSecretGetWithOAuth1(path: string, params: Record<string, string | number | undefined>): Promise<unknown> {
-    const { consumerKey, consumerSecret } = getFatSecretOAuth1Credentials();
-    const url = new URL(path, FAT_SECRET_API_BASE_URL);
-    const baseUrl = `${url.origin}${url.pathname}`;
+function isOAuth1CredentialError(apiError: string): boolean {
+    const normalizedError = apiError.toLowerCase();
 
-    const requestParams = new Map<string, string>();
-    Object.entries(params).forEach(([key, value]) => {
-        if (value === undefined || value === null || value === '') return;
-        requestParams.set(key, String(value));
-    });
-    requestParams.set('format', 'json');
+    return (
+        normalizedError.includes('invalid consumer key') ||
+        normalizedError.includes('invalid signature') ||
+        normalizedError.includes('invalid access token') ||
+        normalizedError.includes('invalid/expired timestamp') ||
+        normalizedError.includes('invalid/used nonce')
+    );
+}
 
+async function executeOAuth1SignedGet(
+    baseUrl: string,
+    requestParams: Map<string, string>,
+    credentials: OAuth1Credentials,
+    context: string
+): Promise<unknown> {
     const oauthParams = new Map<string, string>([
-        ['oauth_consumer_key', consumerKey],
+        ['oauth_consumer_key', credentials.consumerKey],
         ['oauth_nonce', randomBytes(16).toString('hex')],
         ['oauth_signature_method', OAUTH1_SIGNATURE_METHOD],
         ['oauth_timestamp', Math.floor(Date.now() / 1000).toString()],
@@ -347,7 +384,7 @@ async function fatSecretGetWithOAuth1(path: string, params: Record<string, strin
         'GET',
         baseUrl,
         [...requestParams.entries(), ...oauthParams.entries()],
-        consumerSecret
+        credentials.consumerSecret
     );
     oauthParams.set('oauth_signature', signature);
 
@@ -355,22 +392,18 @@ async function fatSecretGetWithOAuth1(path: string, params: Record<string, strin
     const response = await fetch(`${baseUrl}?${finalParams.toString()}`, {
         method: 'GET',
         cache: 'no-store',
+        headers: {
+            Accept: 'application/json, text/plain, */*',
+        },
     });
 
     const text = await response.text();
-    const payload = parseFatSecretResponseBody(text, 'OAuth1');
+    const payload = parseFatSecretResponseBody(text, context);
 
     if (!response.ok) {
         const apiError = parseApiError(payload) || `HTTP ${response.status}`;
-        const normalizedError = apiError.toLowerCase();
 
-        if (
-            normalizedError.includes('invalid consumer key') ||
-            normalizedError.includes('invalid signature') ||
-            normalizedError.includes('invalid access token') ||
-            normalizedError.includes('invalid/expired timestamp') ||
-            normalizedError.includes('invalid/used nonce')
-        ) {
+        if (isOAuth1CredentialError(apiError)) {
             throw new Error(buildOAuth1InvalidCredentialHint(apiError));
         }
 
@@ -379,10 +412,53 @@ async function fatSecretGetWithOAuth1(path: string, params: Record<string, strin
 
     const apiError = parseApiError(payload);
     if (apiError) {
+        if (isOAuth1CredentialError(apiError)) {
+            throw new Error(buildOAuth1InvalidCredentialHint(apiError));
+        }
+
         throw new Error(`Errore FatSecret OAuth1: ${apiError}`);
     }
 
     return payload;
+}
+
+async function fatSecretGetWithOAuth1(path: string, params: Record<string, string | number | undefined>): Promise<unknown> {
+    const credentials = getFatSecretOAuth1Credentials();
+    const url = new URL(path, FAT_SECRET_API_BASE_URL);
+    const baseUrl = `${url.origin}${url.pathname}`;
+
+    const requestParams = new Map<string, string>();
+    Object.entries(params).forEach(([key, value]) => {
+        if (value === undefined || value === null || value === '') return;
+        requestParams.set(key, String(value));
+    });
+    requestParams.set('format', 'json');
+
+    try {
+        return await executeOAuth1SignedGet(baseUrl, requestParams, credentials, 'OAuth1 URL');
+    } catch (primaryError) {
+        if (!isNonJsonFatSecretError(primaryError)) {
+            throw primaryError;
+        }
+
+        const methodName = mapPathToOAuth1Method(path);
+        if (!methodName) {
+            throw primaryError;
+        }
+
+        const methodParams = new Map(requestParams);
+        methodParams.set('method', methodName);
+
+        try {
+            return await executeOAuth1SignedGet(FAT_SECRET_METHOD_API_URL, methodParams, credentials, 'OAuth1 Method');
+        } catch (fallbackError) {
+            if (fallbackError instanceof Error && primaryError instanceof Error) {
+                throw new Error(`${primaryError.message} | Fallback method-based fallita: ${fallbackError.message}`);
+            }
+
+            throw fallbackError;
+        }
+    }
 }
 
 async function getToken(scope: string): Promise<string> {
@@ -576,6 +652,105 @@ function roundNutriments(nutriments: FatSecretProduct['nutriments']): FatSecretP
     };
 }
 
+function normalizeOpenFoodFactsProduct(product: OpenFoodFactsProduct, fallbackId: string): FatSecretProduct | null {
+    const nutriments = product.nutriments;
+    if (!nutriments || !isRecord(nutriments)) {
+        return null;
+    }
+
+    const kcalFromKj = toNumber(nutriments.energy_100g);
+    const kcal =
+        toNumber(nutriments['energy-kcal_100g']) ||
+        toNumber(nutriments['energy-kcal']) ||
+        (kcalFromKj > 0 ? kcalFromKj / 4.184 : 0);
+
+    const normalized = roundNutriments({
+        'energy-kcal_100g': kcal,
+        proteins_100g: toNumber(nutriments.proteins_100g),
+        carbohydrates_100g: toNumber(nutriments.carbohydrates_100g),
+        fat_100g: toNumber(nutriments.fat_100g),
+    });
+
+    const hasValues =
+        normalized['energy-kcal_100g'] > 0 ||
+        normalized.proteins_100g > 0 ||
+        normalized.carbohydrates_100g > 0 ||
+        normalized.fat_100g > 0;
+
+    if (!hasValues) {
+        return null;
+    }
+
+    return {
+        food_id: `off:${product.code || product._id || fallbackId}`,
+        product_name: product.product_name || 'Prodotto OpenFoodFacts',
+        brands: product.brands || '',
+        nutriments: normalized,
+    };
+}
+
+async function fetchJsonWithTimeout(url: string, timeoutMs = 8000): Promise<unknown | null> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+        const response = await fetch(url, {
+            method: 'GET',
+            cache: 'no-store',
+            signal: controller.signal,
+            headers: {
+                Accept: 'application/json, text/plain, */*',
+            },
+        });
+
+        if (!response.ok) return null;
+
+        const text = await response.text();
+        if (!text) return null;
+
+        try {
+            return JSON.parse(text);
+        } catch {
+            return null;
+        }
+    } catch {
+        return null;
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
+async function searchOpenFoodFactsFoods(query: string, limit: number): Promise<FatSecretProduct[]> {
+    const url = `${OPEN_FOOD_FACTS_BASE_URL}/cgi/search.pl?search_terms=${encodeURIComponent(query)}&search_simple=1&action=process&json=1&page_size=${limit}`;
+    const payload = await fetchJsonWithTimeout(url);
+
+    if (!isRecord(payload) || !Array.isArray(payload.products)) {
+        return [];
+    }
+
+    return payload.products
+        .slice(0, limit)
+        .map((rawProduct, index) => {
+            if (!isRecord(rawProduct)) return null;
+            return normalizeOpenFoodFactsProduct(rawProduct as OpenFoodFactsProduct, `${query}-${index}`);
+        })
+        .filter((product): product is FatSecretProduct => !!product);
+}
+
+async function findOpenFoodFactsFoodByBarcode(barcode: string): Promise<FatSecretProduct | null> {
+    const normalizedBarcode = normalizeBarcodeToGtin13(barcode);
+    if (!normalizedBarcode) return null;
+
+    const url = `${OPEN_FOOD_FACTS_BASE_URL}/api/v2/product/${encodeURIComponent(normalizedBarcode)}`;
+    const payload = await fetchJsonWithTimeout(url);
+
+    if (!isRecord(payload) || Number(payload.status) !== 1 || !isRecord(payload.product)) {
+        return null;
+    }
+
+    return normalizeOpenFoodFactsProduct(payload.product as OpenFoodFactsProduct, normalizedBarcode);
+}
+
 function normalizeProduct(food: FatSecretRawFood, detail: FatSecretRawFood | null): FatSecretProduct | null {
     const foodId = extractFoodId(detail?.food_id ?? food.food_id);
     if (!foodId) return null;
@@ -609,33 +784,42 @@ async function getFoodById(foodId: string, scope = 'basic'): Promise<FatSecretRa
 export async function searchFatSecretFoods(query: string, limit = 10): Promise<FatSecretProduct[]> {
     const normalizedLimit = Math.min(Math.max(limit, 1), 20);
 
-    const payload = await fatSecretGet(
-        '/foods/search/v1',
-        {
-            search_expression: query,
-            max_results: normalizedLimit,
-            page_number: 0,
-        },
-        'basic'
-    );
+    try {
+        const payload = await fatSecretGet(
+            '/foods/search/v1',
+            {
+                search_expression: query,
+                max_results: normalizedLimit,
+                page_number: 0,
+            },
+            'basic'
+        );
 
-    const foods = extractSearchFoods(payload);
+        const foods = extractSearchFoods(payload);
 
-    const enriched = await Promise.all(
-        foods.slice(0, normalizedLimit).map(async (food) => {
-            const foodId = extractFoodId(food.food_id);
-            if (!foodId) return normalizeProduct(food, null);
+        const enriched = await Promise.all(
+            foods.slice(0, normalizedLimit).map(async (food) => {
+                const foodId = extractFoodId(food.food_id);
+                if (!foodId) return normalizeProduct(food, null);
 
-            try {
-                const detail = await getFoodById(foodId, 'basic');
-                return normalizeProduct(food, detail);
-            } catch {
-                return normalizeProduct(food, null);
-            }
-        })
-    );
+                try {
+                    const detail = await getFoodById(foodId, 'basic');
+                    return normalizeProduct(food, detail);
+                } catch {
+                    return normalizeProduct(food, null);
+                }
+            })
+        );
 
-    return enriched.filter((item): item is FatSecretProduct => !!item);
+        const products = enriched.filter((item): item is FatSecretProduct => !!item);
+        if (products.length > 0) {
+            return products;
+        }
+    } catch (error) {
+        console.error('FatSecret search failed, trying OpenFoodFacts fallback:', error);
+    }
+
+    return searchOpenFoodFactsFoods(query, normalizedLimit);
 }
 
 export function normalizeBarcodeToGtin13(barcode: string): string | null {
@@ -651,21 +835,26 @@ export async function findFatSecretFoodByBarcode(barcode: string): Promise<FatSe
         return null;
     }
 
-    const payload = await fatSecretGet(
-        '/food/barcode/find-by-id/v1',
-        { barcode: normalizedBarcode },
-        'basic barcode'
-    );
+    try {
+        const payload = await fatSecretGet(
+            '/food/barcode/find-by-id/v1',
+            { barcode: normalizedBarcode },
+            'basic barcode'
+        );
 
-    const responseRecord = isRecord(payload) ? payload : null;
-    const foodId = extractFoodId(responseRecord?.food_id);
+        const responseRecord = isRecord(payload) ? payload : null;
+        const foodId = extractFoodId(responseRecord?.food_id);
 
-    if (!foodId) {
-        return null;
+        if (!foodId) {
+            return findOpenFoodFactsFoodByBarcode(normalizedBarcode);
+        }
+
+        const detail = await getFoodById(foodId, 'basic barcode');
+        if (!detail) return findOpenFoodFactsFoodByBarcode(normalizedBarcode);
+
+        return normalizeProduct(detail, detail);
+    } catch (error) {
+        console.error('FatSecret barcode failed, trying OpenFoodFacts fallback:', error);
+        return findOpenFoodFactsFoodByBarcode(normalizedBarcode);
     }
-
-    const detail = await getFoodById(foodId, 'basic barcode');
-    if (!detail) return null;
-
-    return normalizeProduct(detail, detail);
 }

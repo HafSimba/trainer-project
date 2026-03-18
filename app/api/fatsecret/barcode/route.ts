@@ -24,6 +24,6 @@ export async function GET(request: NextRequest) {
         console.error('Errore API FatSecret barcode:', error);
 
         const message = error instanceof Error ? error.message : 'Errore interno durante la ricerca barcode.';
-        return NextResponse.json({ error: message }, { status: 500 });
+        return NextResponse.json({ product: null, error: message }, { status: 200 });
     }
 }

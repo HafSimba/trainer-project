@@ -21,6 +21,6 @@ export async function GET(request: NextRequest) {
         console.error('Errore API FatSecret search:', error);
 
         const message = error instanceof Error ? error.message : 'Errore interno durante la ricerca alimenti.';
-        return NextResponse.json({ error: message }, { status: 500 });
+        return NextResponse.json({ products: [], warning: message }, { status: 200 });
     }
 }
