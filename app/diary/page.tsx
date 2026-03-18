@@ -1,7 +1,7 @@
 ﻿'use client';
 
 import { useState, useEffect } from "react";
-import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
+import { PieChart, Pie, Cell } from "recharts";
 import { Plus, Search, Camera, Droplets, Trash2, Loader2, Pencil } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -361,17 +361,15 @@ export default function Diary() {
 
       <Card className="shadow-sm border-none bg-white">
         <CardContent className="p-4 flex gap-4 items-center">
-          <div className="w-1/3 relative h-28 min-w-[96px] min-h-[96px]">
+          <div className="w-1/3 relative h-28 min-w-[96px] min-h-[96px] flex items-center justify-center">
             {isChartMounted && (
-              <ResponsiveContainer width="100%" height="100%" minWidth={96} minHeight={96}>
-                <PieChart>
-                  <Pie data={pieData} dataKey="value" innerRadius={25} outerRadius={40} paddingAngle={2}>
-                    {pieData.map((entry, index) => (
-                      <Cell key={'cell-' + index} fill={entry.color} />
-                    ))}
-                  </Pie>
-                </PieChart>
-              </ResponsiveContainer>
+              <PieChart width={96} height={96}>
+                <Pie data={pieData} dataKey="value" innerRadius={25} outerRadius={40} paddingAngle={2}>
+                  {pieData.map((entry, index) => (
+                    <Cell key={'cell-' + index} fill={entry.color} />
+                  ))}
+                </Pie>
+              </PieChart>
             )}
             <div className="absolute inset-0 flex items-center justify-center flex-col">
               <span className="text-xs font-bold">{Math.round(summary.total_calories)}</span>
