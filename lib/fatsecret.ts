@@ -236,6 +236,17 @@ function parseApiError(payload: unknown): string | null {
     return null;
 }
 
+function parseFatSecretResponseBody(text: string, context: string): unknown {
+    if (!text) return null;
+
+    try {
+        return JSON.parse(text);
+    } catch {
+        const snippet = text.slice(0, 120).replace(/\s+/g, ' ').trim();
+        throw new Error(`Risposta non JSON da FatSecret (${context}). Anteprima: ${snippet || 'vuota'}`);
+    }
+}
+
 async function requestToken(scope: string): Promise<TokenCache> {
     const normalizedScope = normalizeScope(scope);
     const { clientId, clientSecret } = getFatSecretOAuth2Credentials();
@@ -347,7 +358,7 @@ async function fatSecretGetWithOAuth1(path: string, params: Record<string, strin
     });
 
     const text = await response.text();
-    const payload = text ? JSON.parse(text) : null;
+    const payload = parseFatSecretResponseBody(text, 'OAuth1');
 
     if (!response.ok) {
         const apiError = parseApiError(payload) || `HTTP ${response.status}`;
@@ -420,7 +431,7 @@ async function fatSecretGet(path: string, params: Record<string, string | number
         });
 
         const text = await response.text();
-        const payload = text ? JSON.parse(text) : null;
+        const payload = parseFatSecretResponseBody(text, 'OAuth2');
 
         if ((response.status === 401 || response.status === 403) && !forceRefreshToken) {
             return request(true);

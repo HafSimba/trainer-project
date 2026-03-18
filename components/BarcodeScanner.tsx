@@ -55,6 +55,16 @@ function getErrorMessage(error: unknown): string {
     return 'Errore durante il recupero del prodotto';
 }
 
+function parseJsonSafe<T>(text: string): T | null {
+        if (!text) return null;
+
+        try {
+                return JSON.parse(text) as T;
+        } catch {
+                return null;
+        }
+}
+
 function normalizeDetectedBarcode(rawValue: string): string {
     const normalized = rawValue.replace(/\D/g, '');
     return normalized || rawValue.trim();
@@ -210,10 +220,11 @@ export function BarcodeScanner({
         setError(null);
         try {
             const res = await fetch(`/api/fatsecret/barcode?barcode=${encodeURIComponent(barcode)}`);
-            const data = await res.json() as { product?: ProductInfo; error?: string };
+            const rawText = await res.text();
+            const data = parseJsonSafe<{ product?: ProductInfo; error?: string }>(rawText);
 
-            if (!res.ok || !data.product) {
-                throw new Error(data.error || 'Prodotto non trovato su FatSecret');
+            if (!res.ok || !data?.product) {
+                throw new Error(data?.error || `Prodotto non trovato su FatSecret (HTTP ${res.status})`);
             }
 
             onProductFound(data.product);

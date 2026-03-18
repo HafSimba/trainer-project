@@ -76,6 +76,16 @@ async function postLogAction(payload: Record<string, unknown>) {
   });
 }
 
+function parseJsonSafe<T>(text: string): T | null {
+  if (!text) return null;
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return null;
+  }
+}
+
 export default function Diary() {
   const [log, setLog] = useState<DailyLog | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -149,10 +159,15 @@ export default function Diary() {
     setShowScanner(false);
     try {
       const res = await fetch('/api/fatsecret/search?q=' + encodeURIComponent(searchQuery) + '&limit=10');
-      const data = await res.json() as { products?: OpenFoodProduct[]; error?: string };
+      const rawText = await res.text();
+      const data = parseJsonSafe<{ products?: OpenFoodProduct[]; error?: string }>(rawText);
 
       if (!res.ok) {
-        throw new Error(data.error || 'Errore durante la ricerca alimenti');
+        throw new Error(data?.error || `Errore durante la ricerca alimenti (HTTP ${res.status})`);
+      }
+
+      if (!data) {
+        throw new Error('Risposta non valida dal server di ricerca alimenti.');
       }
 
       setSearchResults(data.products || []);

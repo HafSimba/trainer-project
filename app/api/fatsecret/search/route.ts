@@ -3,6 +3,7 @@ import { searchFatSecretFoods } from '@/lib/fatsecret';
 
 export const revalidate = 0;
 export const fetchCache = 'force-no-store';
+export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
     try {
