@@ -1,6 +1,22 @@
+import { createHmac, randomBytes } from 'node:crypto';
+
 const FAT_SECRET_OAUTH_URL = 'https://oauth.fatsecret.com/connect/token';
 const FAT_SECRET_API_BASE_URL = 'https://platform.fatsecret.com/rest';
 const TOKEN_EXPIRY_BUFFER_MS = 60_000;
+const OAUTH1_SIGNATURE_METHOD = 'HMAC-SHA1';
+const OAUTH1_VERSION = '1.0';
+
+type FatSecretAuthMode = 'oauth1' | 'oauth2';
+
+type OAuth2Credentials = {
+    clientId: string;
+    clientSecret: string;
+};
+
+type OAuth1Credentials = {
+    consumerKey: string;
+    consumerSecret: string;
+};
 
 type TokenCache = {
     accessToken: string;
@@ -95,6 +111,13 @@ function sanitizeEnvValue(value: string | undefined): string {
     return trimmed;
 }
 
+function isLikelyPlaceholder(value: string): boolean {
+    if (!value) return true;
+
+    const normalized = value.toLowerCase();
+    return normalized.startsWith('inserisci_') || (value.startsWith('<') && value.endsWith('>'));
+}
+
 function buildInvalidClientHint(scope: string): string {
     return [
         'Autenticazione FatSecret fallita: invalid_client.',
@@ -105,16 +128,25 @@ function buildInvalidClientHint(scope: string): string {
     ].join(' ');
 }
 
-function getFatSecretCredentials(): { clientId: string; clientSecret: string } {
+function buildOAuth1InvalidCredentialHint(details: string): string {
+    return [
+        `Autenticazione FatSecret OAuth1 fallita: ${details}.`,
+        'Verifica FAT_SECRET_CONSUMER_KEY e FAT_SECRET_CONSUMER_SECRET.',
+        'Controlla che siano credenziali OAuth 1.0 (non OAuth 2.0).',
+        'Verifica la whitelist IP su FatSecret (può richiedere fino a 24h).',
+    ].join(' ');
+}
+
+function parseFatSecretOAuth2Credentials(): OAuth2Credentials | null {
     const fromPair = sanitizeEnvValue(process.env.FAT_SECRET_API_KEY);
     const directClientId = sanitizeEnvValue(process.env.FAT_SECRET_CLIENT_ID);
     const directClientSecret = sanitizeEnvValue(process.env.FAT_SECRET_CLIENT_SECRET);
 
-    if (directClientId && directClientSecret) {
+    if (directClientId && directClientSecret && !isLikelyPlaceholder(directClientId) && !isLikelyPlaceholder(directClientSecret)) {
         return { clientId: directClientId, clientSecret: directClientSecret };
     }
 
-    if (fromPair) {
+    if (fromPair && !isLikelyPlaceholder(fromPair)) {
         const separatorIndex = fromPair.indexOf(':');
 
         if (separatorIndex > 0 && separatorIndex < fromPair.length - 1) {
@@ -127,7 +159,60 @@ function getFatSecretCredentials(): { clientId: string; clientSecret: string } {
         }
     }
 
+    return null;
+}
+
+function parseFatSecretOAuth1Credentials(): OAuth1Credentials | null {
+    const consumerKey = sanitizeEnvValue(process.env.FAT_SECRET_CONSUMER_KEY);
+    const consumerSecret = sanitizeEnvValue(process.env.FAT_SECRET_CONSUMER_SECRET);
+
+    if (!consumerKey || !consumerSecret || isLikelyPlaceholder(consumerKey) || isLikelyPlaceholder(consumerSecret)) {
+        return null;
+    }
+
+    return { consumerKey, consumerSecret };
+}
+
+function getConfiguredAuthMode(): FatSecretAuthMode {
+    const rawMode = sanitizeEnvValue(process.env.FAT_SECRET_AUTH_MODE).toLowerCase();
+
+    if (rawMode === 'oauth1' || rawMode === '1.0' || rawMode === 'oauth_1') {
+        return 'oauth1';
+    }
+
+    if (rawMode === 'oauth2' || rawMode === '2.0' || rawMode === 'oauth_2') {
+        return 'oauth2';
+    }
+
+    if (parseFatSecretOAuth2Credentials()) {
+        return 'oauth2';
+    }
+
+    if (parseFatSecretOAuth1Credentials()) {
+        return 'oauth1';
+    }
+
+    throw new Error(
+        'Configurazione FatSecret mancante: imposta FAT_SECRET_CLIENT_ID/FAT_SECRET_CLIENT_SECRET (OAuth2) oppure FAT_SECRET_CONSUMER_KEY/FAT_SECRET_CONSUMER_SECRET (OAuth1).'
+    );
+}
+
+function getFatSecretOAuth2Credentials(): OAuth2Credentials {
+    const credentials = parseFatSecretOAuth2Credentials();
+    if (credentials) {
+        return credentials;
+    }
+
     throw new Error('Configurazione FatSecret mancante: imposta FAT_SECRET_API_KEY nel formato CLIENT_ID:CLIENT_SECRET oppure FAT_SECRET_CLIENT_ID e FAT_SECRET_CLIENT_SECRET.');
+}
+
+function getFatSecretOAuth1Credentials(): OAuth1Credentials {
+    const credentials = parseFatSecretOAuth1Credentials();
+    if (credentials) {
+        return credentials;
+    }
+
+    throw new Error('Configurazione FatSecret OAuth1 mancante: imposta FAT_SECRET_CONSUMER_KEY e FAT_SECRET_CONSUMER_SECRET.');
 }
 
 function parseApiError(payload: unknown): string | null {
@@ -153,7 +238,7 @@ function parseApiError(payload: unknown): string | null {
 
 async function requestToken(scope: string): Promise<TokenCache> {
     const normalizedScope = normalizeScope(scope);
-    const { clientId, clientSecret } = getFatSecretCredentials();
+    const { clientId, clientSecret } = getFatSecretOAuth2Credentials();
 
     const body = new URLSearchParams();
     body.set('grant_type', 'client_credentials');
@@ -197,6 +282,98 @@ async function requestToken(scope: string): Promise<TokenCache> {
     };
 }
 
+function oauthPercentEncode(value: string): string {
+    return encodeURIComponent(value)
+        .replace(/[!'()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
+function buildOAuth1Signature(
+    method: 'GET' | 'POST',
+    baseUrl: string,
+    parameters: Array<[string, string]>,
+    consumerSecret: string
+): string {
+    const normalizedParameters = [...parameters]
+        .sort(([keyA, valueA], [keyB, valueB]) => {
+            const keyComparison = keyA.localeCompare(keyB);
+            if (keyComparison !== 0) return keyComparison;
+            return valueA.localeCompare(valueB);
+        })
+        .map(([key, value]) => `${oauthPercentEncode(key)}=${oauthPercentEncode(value)}`)
+        .join('&');
+
+    const signatureBaseString = [
+        method,
+        oauthPercentEncode(baseUrl),
+        oauthPercentEncode(normalizedParameters),
+    ].join('&');
+
+    const signingKey = `${oauthPercentEncode(consumerSecret)}&`;
+    return createHmac('sha1', signingKey).update(signatureBaseString).digest('base64');
+}
+
+async function fatSecretGetWithOAuth1(path: string, params: Record<string, string | number | undefined>): Promise<unknown> {
+    const { consumerKey, consumerSecret } = getFatSecretOAuth1Credentials();
+    const url = new URL(path, FAT_SECRET_API_BASE_URL);
+    const baseUrl = `${url.origin}${url.pathname}`;
+
+    const requestParams = new Map<string, string>();
+    Object.entries(params).forEach(([key, value]) => {
+        if (value === undefined || value === null || value === '') return;
+        requestParams.set(key, String(value));
+    });
+    requestParams.set('format', 'json');
+
+    const oauthParams = new Map<string, string>([
+        ['oauth_consumer_key', consumerKey],
+        ['oauth_nonce', randomBytes(16).toString('hex')],
+        ['oauth_signature_method', OAUTH1_SIGNATURE_METHOD],
+        ['oauth_timestamp', Math.floor(Date.now() / 1000).toString()],
+        ['oauth_version', OAUTH1_VERSION],
+    ]);
+
+    const signature = buildOAuth1Signature(
+        'GET',
+        baseUrl,
+        [...requestParams.entries(), ...oauthParams.entries()],
+        consumerSecret
+    );
+    oauthParams.set('oauth_signature', signature);
+
+    const finalParams = new URLSearchParams([...requestParams.entries(), ...oauthParams.entries()]);
+    const response = await fetch(`${baseUrl}?${finalParams.toString()}`, {
+        method: 'GET',
+        cache: 'no-store',
+    });
+
+    const text = await response.text();
+    const payload = text ? JSON.parse(text) : null;
+
+    if (!response.ok) {
+        const apiError = parseApiError(payload) || `HTTP ${response.status}`;
+        const normalizedError = apiError.toLowerCase();
+
+        if (
+            normalizedError.includes('invalid consumer key') ||
+            normalizedError.includes('invalid signature') ||
+            normalizedError.includes('invalid access token') ||
+            normalizedError.includes('invalid/expired timestamp') ||
+            normalizedError.includes('invalid/used nonce')
+        ) {
+            throw new Error(buildOAuth1InvalidCredentialHint(apiError));
+        }
+
+        throw new Error(`Errore FatSecret OAuth1: ${apiError}`);
+    }
+
+    const apiError = parseApiError(payload);
+    if (apiError) {
+        throw new Error(`Errore FatSecret OAuth1: ${apiError}`);
+    }
+
+    return payload;
+}
+
 async function getToken(scope: string): Promise<string> {
     const normalizedScope = normalizeScope(scope);
 
@@ -213,6 +390,12 @@ async function getToken(scope: string): Promise<string> {
 }
 
 async function fatSecretGet(path: string, params: Record<string, string | number | undefined>, scope: string): Promise<unknown> {
+    const authMode = getConfiguredAuthMode();
+
+    if (authMode === 'oauth1') {
+        return fatSecretGetWithOAuth1(path, params);
+    }
+
     const request = async (forceRefreshToken: boolean): Promise<unknown> => {
         if (forceRefreshToken) {
             tokenCache = null;

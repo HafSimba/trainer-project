@@ -31,11 +31,19 @@ FAT_SECRET_API_KEY="<CLIENT_ID>:<CLIENT_SECRET>"
 # Alternative format (equivalent)
 FAT_SECRET_CLIENT_ID="<CLIENT_ID>"
 FAT_SECRET_CLIENT_SECRET="<CLIENT_SECRET>"
+
+# Optional: force auth mode (oauth2 | oauth1)
+FAT_SECRET_AUTH_MODE="oauth2"
+
+# OAuth1 alternative
+FAT_SECRET_CONSUMER_KEY="<CONSUMER_KEY>"
+FAT_SECRET_CONSUMER_SECRET="<CONSUMER_SECRET>"
 ```
 
 Notes:
 
 - Requests are performed server-side via OAuth2 Client Credentials.
+- OAuth1 signed requests are also supported by setting `FAT_SECRET_AUTH_MODE=oauth1`.
 - In Vercel, add the variables in Project Settings → Environment Variables.
 - For barcode lookup, your FatSecret app must have `barcode` scope enabled.
 
@@ -44,6 +52,7 @@ Notes:
 - `invalid_client`: ensure values are OAuth 2.0 Client ID/Client Secret (not OAuth 1.0 Consumer Key/Secret).
 - If using `FAT_SECRET_API_KEY`, format must be exactly `CLIENT_ID:CLIENT_SECRET` (single line, no quotes, no spaces).
 - If deployment is on Vercel, check FatSecret IP allowlist requirements for OAuth2 token requests.
+- For OAuth1 errors (`Invalid consumer key`, `Invalid signature`), verify `FAT_SECRET_CONSUMER_KEY` / `FAT_SECRET_CONSUMER_SECRET` and whitelist IP.
 
 ## Learn More
 
