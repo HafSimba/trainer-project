@@ -29,6 +29,7 @@ type OpenFoodNutriments = {
 };
 
 type OpenFoodProduct = {
+  food_id?: string;
   product_name?: string;
   brands?: string;
   nutriments?: OpenFoodNutriments;
@@ -147,11 +148,17 @@ export default function Diary() {
     setIsSearching(true);
     setShowScanner(false);
     try {
-      const res = await fetch('https://world.openfoodfacts.org/cgi/search.pl?search_terms=' + searchQuery + '&search_simple=1&action=process&json=1&page_size=10');
-      const data = await res.json() as { products?: OpenFoodProduct[] };
+      const res = await fetch('/api/fatsecret/search?q=' + encodeURIComponent(searchQuery) + '&limit=10');
+      const data = await res.json() as { products?: OpenFoodProduct[]; error?: string };
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Errore durante la ricerca alimenti');
+      }
+
       setSearchResults(data.products || []);
-    } catch (e) {
-      console.error(e);
+    } catch (error) {
+      console.error(error);
+      setSearchResults([]);
     }
     setIsSearching(false);
   };

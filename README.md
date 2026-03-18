@@ -20,6 +20,25 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Environment Variables
+
+To enable food search and barcode lookup via FatSecret, configure these variables:
+
+```bash
+# Preferred single-variable format
+FAT_SECRET_API_KEY="<CLIENT_ID>:<CLIENT_SECRET>"
+
+# Alternative format (equivalent)
+FAT_SECRET_CLIENT_ID="<CLIENT_ID>"
+FAT_SECRET_CLIENT_SECRET="<CLIENT_SECRET>"
+```
+
+Notes:
+
+- Requests are performed server-side via OAuth2 Client Credentials.
+- In Vercel, add the variables in Project Settings → Environment Variables.
+- For barcode lookup, your FatSecret app must have `barcode` scope enabled.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
