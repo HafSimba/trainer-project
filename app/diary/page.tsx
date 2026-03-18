@@ -346,9 +346,9 @@ export default function Diary() {
 
       <Card className="shadow-sm border-none bg-white">
         <CardContent className="p-4 flex gap-4 items-center">
-          <div className="w-1/3 relative h-28">
+          <div className="w-1/3 relative h-28 min-w-[96px] min-h-[96px]">
             {isChartMounted && (
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={96} minHeight={96}>
                 <PieChart>
                   <Pie data={pieData} dataKey="value" innerRadius={25} outerRadius={40} paddingAngle={2}>
                     {pieData.map((entry, index) => (

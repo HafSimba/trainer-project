@@ -77,10 +77,38 @@ function normalizeScope(scope: string): string {
     return Array.from(new Set(parts)).sort().join(' ');
 }
 
+function sanitizeEnvValue(value: string | undefined): string {
+    if (!value) return '';
+
+    const trimmed = value
+        .replace(/[\u200B-\u200D\uFEFF]/g, '')
+        .replace(/[\r\n\t]/g, '')
+        .trim();
+
+    const hasDoubleQuotes = trimmed.startsWith('"') && trimmed.endsWith('"');
+    const hasSingleQuotes = trimmed.startsWith("'") && trimmed.endsWith("'");
+
+    if ((hasDoubleQuotes || hasSingleQuotes) && trimmed.length >= 2) {
+        return trimmed.slice(1, -1).trim();
+    }
+
+    return trimmed;
+}
+
+function buildInvalidClientHint(scope: string): string {
+    return [
+        'Autenticazione FatSecret fallita: invalid_client.',
+        'Verifica che le credenziali siano OAuth 2.0 (non OAuth 1.0).',
+        'Controlla che FAT_SECRET_API_KEY sia nel formato CLIENT_ID:CLIENT_SECRET senza spazi o virgolette.',
+        `Scope richiesto da questa chiamata: ${scope}.`,
+        'Se usi Vercel, verifica anche la whitelist IP/egrress richiesta da FatSecret per OAuth2.',
+    ].join(' ');
+}
+
 function getFatSecretCredentials(): { clientId: string; clientSecret: string } {
-    const fromPair = process.env.FAT_SECRET_API_KEY?.trim();
-    const directClientId = process.env.FAT_SECRET_CLIENT_ID?.trim();
-    const directClientSecret = process.env.FAT_SECRET_CLIENT_SECRET?.trim();
+    const fromPair = sanitizeEnvValue(process.env.FAT_SECRET_API_KEY);
+    const directClientId = sanitizeEnvValue(process.env.FAT_SECRET_CLIENT_ID);
+    const directClientSecret = sanitizeEnvValue(process.env.FAT_SECRET_CLIENT_SECRET);
 
     if (directClientId && directClientSecret) {
         return { clientId: directClientId, clientSecret: directClientSecret };
@@ -152,6 +180,11 @@ async function requestToken(scope: string): Promise<TokenCache> {
 
     if (!response.ok || !payload?.access_token) {
         const details = payload?.error_description || payload?.error || `HTTP ${response.status}`;
+
+        if (String(details).toLowerCase().includes('invalid_client')) {
+            throw new Error(buildInvalidClientHint(normalizedScope));
+        }
+
         throw new Error(`Autenticazione FatSecret fallita: ${details}`);
     }
 

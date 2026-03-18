@@ -39,6 +39,12 @@ Notes:
 - In Vercel, add the variables in Project Settings → Environment Variables.
 - For barcode lookup, your FatSecret app must have `barcode` scope enabled.
 
+### FatSecret Troubleshooting
+
+- `invalid_client`: ensure values are OAuth 2.0 Client ID/Client Secret (not OAuth 1.0 Consumer Key/Secret).
+- If using `FAT_SECRET_API_KEY`, format must be exactly `CLIENT_ID:CLIENT_SECRET` (single line, no quotes, no spaces).
+- If deployment is on Vercel, check FatSecret IP allowlist requirements for OAuth2 token requests.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
