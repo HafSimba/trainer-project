@@ -418,6 +418,17 @@ export default function Diary() {
         {renderMealSection('snack', 'Snacks')}
       </div>
 
+      <div className="-mt-1 text-center">
+        <a
+          href="https://platform.fatsecret.com/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-[11px] font-medium text-green-600 hover:underline"
+        >
+          Powered by FatSecret
+        </a>
+      </div>
+
       <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
         <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto w-11/12 rounded-xl">
           <DialogHeader>
