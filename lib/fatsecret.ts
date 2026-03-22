@@ -776,33 +776,60 @@ export async function searchFatSecretFoods(query: string, limit = 10): Promise<F
 function normalizeBarcodeToGtin13(barcode: string): string | null {
     const digits = barcode.replace(/\D/g, '');
     if (!digits) return null;
-    if (digits.length > 13) return null;
-    return digits.padStart(13, '0');
+    return digits;
 }
 
 export async function findFatSecretFoodByBarcode(barcode: string): Promise<FatSecretProduct | null> {
-    const normalizedBarcode = normalizeBarcodeToGtin13(barcode);
-    if (!normalizedBarcode) {
+    const digits = normalizeBarcodeToGtin13(barcode);
+    if (!digits) {
         return null;
     }
 
-    const payload = await fatSecretGet(
-        '/food/barcode/find-by-id/v1',
-        { barcode: normalizedBarcode },
-        'basic barcode'
-    );
+    // Try GTIN-13 padded version first
+    const gtin13 = digits.length <= 13 ? digits.padStart(13, '0') : digits;
 
-    const responseRecord = isRecord(payload) ? payload : null;
-    const foodId = extractFoodId(responseRecord?.food_id);
+    try {
+        const payload = await fatSecretGet(
+            '/food/barcode/find-by-id/v1',
+            { barcode: gtin13 },
+            'basic barcode'
+        );
 
-    if (!foodId) {
-        return null;
+        const responseRecord = isRecord(payload) ? payload : null;
+        let foodId = extractFoodId(responseRecord?.food_id);
+
+        // Se non trova con gtin13, e il barcode originale era diverso, proviamo con quello originale
+        if (!foodId && digits !== gtin13) {
+            const payloadOrig = await fatSecretGet(
+                '/food/barcode/find-by-id/v1',
+                { barcode: digits },
+                'basic barcode'
+            );
+            const responseRecordOrig = isRecord(payloadOrig) ? payloadOrig : null;
+            foodId = extractFoodId(responseRecordOrig?.food_id);
+        }
+
+        if (foodId) {
+            const detail = await getFoodById(foodId, 'basic barcode');
+            if (detail) {
+                const product = normalizeProduct(detail, detail);
+                if (product) return product;
+            }
+        }
+    } catch {
+        // ignore crash on find-by-id and fallback to search
     }
 
-    const detail = await getFoodById(foodId, 'basic barcode');
-    if (!detail) {
-        return null;
+    // Fallback: search by barcode text across the database
+    // A volte FatSecret non mappa i barcode nell'endpoint find-by-id ma lo indicizza come nome o alias
+    try {
+        const fallbackSearch = await searchFatSecretFoods(digits, 1);
+        if (fallbackSearch && fallbackSearch.length > 0) {
+            return fallbackSearch[0];
+        }
+    } catch {
+        // ignore
     }
 
-    return normalizeProduct(detail, detail);
+    return null;
 }
