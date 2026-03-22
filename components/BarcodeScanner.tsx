@@ -14,6 +14,7 @@ import { Loader2 } from 'lucide-react';
 
 const SCAN_INTERVAL_MS = 260;
 const SAME_BARCODE_COOLDOWN_MS = 2500;
+const FAILED_BARCODE_COOLDOWN_MS = 12000;
 const ROI_WIDTH_RATIO = 0.78;
 const ROI_HEIGHT_RATIO = 0.3;
 
@@ -108,6 +109,8 @@ export function BarcodeScanner({
     const nativeDetectorRef = useRef<BarcodeDetectorLike | null>(null);
     const decodeInProgressRef = useRef(false);
     const lastDetectedBarcodeRef = useRef<{ value: string; timestamp: number } | null>(null);
+    const failedBarcodeCooldownRef = useRef<Map<string, number>>(new Map());
+    const requestInFlightRef = useRef<string | null>(null);
 
     const [scanning, setScanning] = useState(false);
     const [loading, setLoading] = useState(false);
@@ -177,6 +180,19 @@ export function BarcodeScanner({
         };
     }, []);
 
+    const isBarcodeInErrorCooldown = useCallback((barcode: string): boolean => {
+        const until = failedBarcodeCooldownRef.current.get(barcode) ?? 0;
+        return until > Date.now();
+    }, []);
+
+    const setBarcodeErrorCooldown = useCallback((barcode: string) => {
+        failedBarcodeCooldownRef.current.set(barcode, Date.now() + FAILED_BARCODE_COOLDOWN_MS);
+    }, []);
+
+    const clearBarcodeErrorCooldown = useCallback((barcode: string) => {
+        failedBarcodeCooldownRef.current.delete(barcode);
+    }, []);
+
     const captureRoiFrame = useCallback((video: HTMLVideoElement): HTMLCanvasElement | null => {
         const sourceWidth = video.videoWidth;
         const sourceHeight = video.videoHeight;
@@ -230,21 +246,21 @@ export function BarcodeScanner({
     }, []);
 
     const fetchProductData = useCallback(async (barcode: string) => {
+        if (requestInFlightRef.current === barcode) {
+            return;
+        }
+
+        requestInFlightRef.current = barcode;
         setLoading(true);
-        setScanning(false);
         setError(null);
         try {
             const res = await fetch(`/api/fatsecret/barcode?barcode=${encodeURIComponent(barcode)}`);
             const rawText = await res.text();
 
-            let data: { product?: ProductInfo; error?: string } | null = null;
-            try {
-                data = JSON.parse(rawText);
-            } catch (e) {
+            const data = parseJsonSafe<{ product?: ProductInfo; error?: string }>(rawText);
+            if (!data) {
                 throw new Error(`Risposta non valida dal server (HTTP ${res.status})`);
             }
-
-            if (!data) throw new Error("Risposta vuota");
 
             if (!res.ok || (!data.product && data.error)) {
                 throw new Error(data.error || `Prodotto non trovato (HTTP ${res.status})`);
@@ -254,15 +270,16 @@ export function BarcodeScanner({
                 throw new Error(`Prodotto non trovato o dati mancanti.`);
             }
 
+            clearBarcodeErrorCooldown(barcode);
             onProductFound(data.product);
         } catch (error: unknown) {
             setError(getErrorMessage(error));
-            // Do NOT immediately reset the last detected code nor start scanning again automatically. 
-            // The user must manually click to restart or try another product
+            setBarcodeErrorCooldown(barcode);
         } finally {
+            requestInFlightRef.current = null;
             setLoading(false);
         }
-    }, [onProductFound]);
+    }, [clearBarcodeErrorCooldown, onProductFound, setBarcodeErrorCooldown]);
 
     const captureAndScan = useCallback(async () => {
         if (!scanning || loading || decodeInProgressRef.current || !webcamRef.current?.video) {
@@ -302,7 +319,7 @@ export function BarcodeScanner({
                 }
             }
 
-            if (!barcode || shouldSkipBarcode(barcode)) {
+            if (!barcode || shouldSkipBarcode(barcode) || isBarcodeInErrorCooldown(barcode)) {
                 return;
             }
 
@@ -316,6 +333,7 @@ export function BarcodeScanner({
         detectWithNative,
         detectWithZxing,
         fetchProductData,
+        isBarcodeInErrorCooldown,
         loading,
         rememberBarcode,
         scanning,
@@ -397,6 +415,7 @@ export function BarcodeScanner({
                             const nextValue = !previousValue;
                             if (nextValue) {
                                 lastDetectedBarcodeRef.current = null;
+                                failedBarcodeCooldownRef.current.clear();
                             }
                             return nextValue;
                         });
