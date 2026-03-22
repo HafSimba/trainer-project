@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { Suspense, useCallback, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, Camera, Loader2, Plus, Search, Trash2 } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
@@ -237,7 +237,7 @@ function computeItemMacros(item: SelectedFoodItem): ComputedMacros {
     };
 }
 
-export default function DiaryFoodSearchPage() {
+function DiaryFoodSearchContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
 
@@ -571,5 +571,19 @@ export default function DiaryFoodSearchPage() {
                 </CardContent>
             </Card>
         </main>
+    );
+}
+
+export default function DiaryFoodSearchPage() {
+    return (
+        <Suspense
+            fallback={(
+                <main className="flex-1 p-4 pt-8 pb-24 overflow-y-auto flex flex-col gap-4">
+                    <p className="text-sm text-gray-500">Caricamento ricerca alimento...</p>
+                </main>
+            )}
+        >
+            <DiaryFoodSearchContent />
+        </Suspense>
     );
 }
