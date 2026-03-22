@@ -14,6 +14,11 @@ type OAuth2Credentials = {
     clientSecret: string;
 };
 
+type OpenFoodFactsLookup = {
+    productName: string;
+    brands: string;
+};
+
 type OAuth1Credentials = {
     consumerKey: string;
     consumerSecret: string;
@@ -102,6 +107,16 @@ function toNumber(value: unknown): number {
     }
 
     return 0;
+}
+
+function normalizeForMatch(value: string): string {
+    return value
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
 }
 
 function normalizeScope(scope: string): string {
@@ -773,6 +788,84 @@ export async function searchFatSecretFoods(query: string, limit = 10): Promise<F
     return enriched.filter((item): item is FatSecretProduct => !!item);
 }
 
+function buildOpenFoodFactsCandidates(lookup: OpenFoodFactsLookup): string[] {
+    const productName = lookup.productName.trim();
+    const brands = lookup.brands.trim();
+
+    const productWords = productName
+        .split(/\s+/)
+        .map((word) => word.trim())
+        .filter((word) => word.length >= 3);
+
+    const candidates = [
+        productName,
+        brands ? `${brands} ${productName}` : '',
+        brands,
+        productWords.slice(0, 3).join(' '),
+    ]
+        .map((candidate) => candidate.trim())
+        .filter(Boolean);
+
+    return Array.from(new Set(candidates));
+}
+
+function scoreFatSecretMatch(product: FatSecretProduct, lookup: OpenFoodFactsLookup): number {
+    const targetName = normalizeForMatch(lookup.productName);
+    const targetBrand = normalizeForMatch(lookup.brands);
+    const productName = normalizeForMatch(product.product_name || '');
+    const productBrand = normalizeForMatch(product.brands || '');
+
+    let score = 0;
+
+    if (targetName && productName) {
+        if (productName === targetName) score += 200;
+        if (productName.includes(targetName) || targetName.includes(productName)) score += 120;
+
+        const words = targetName.split(' ').filter((word) => word.length >= 4);
+        for (const word of words) {
+            if (productName.includes(word)) {
+                score += 25;
+            }
+        }
+    }
+
+    if (targetBrand && productBrand) {
+        if (productBrand === targetBrand) score += 80;
+        if (productBrand.includes(targetBrand) || targetBrand.includes(productBrand)) score += 45;
+    }
+
+    return score;
+}
+
+async function findOpenFoodFactsInfoByBarcode(barcode: string): Promise<OpenFoodFactsLookup | null> {
+    const endpoint = `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(barcode)}?fields=product_name,brands,status`;
+    const response = await fetch(endpoint, {
+        method: 'GET',
+        cache: 'no-store',
+    });
+
+    if (!response.ok) return null;
+
+    const payload = await response.json().catch(() => null) as unknown;
+    if (!isRecord(payload)) return null;
+
+    const status = typeof payload.status === 'number' ? payload.status : Number(payload.status);
+    if (!Number.isFinite(status) || status !== 1) return null;
+
+    const product = isRecord(payload.product) ? payload.product : null;
+    if (!product) return null;
+
+    const productName = typeof product.product_name === 'string' ? product.product_name.trim() : '';
+    const brands = typeof product.brands === 'string' ? product.brands.trim() : '';
+
+    if (!productName) return null;
+
+    return {
+        productName,
+        brands,
+    };
+}
+
 function normalizeBarcodeToGtin13(barcode: string): string | null {
     const digits = barcode.replace(/\D/g, '');
     if (!digits) return null;
@@ -826,6 +919,33 @@ export async function findFatSecretFoodByBarcode(barcode: string): Promise<FatSe
         const fallbackSearch = await searchFatSecretFoods(digits, 1);
         if (fallbackSearch && fallbackSearch.length > 0) {
             return fallbackSearch[0];
+        }
+    } catch {
+        // ignore
+    }
+
+    // Secondary fallback: use Open Food Facts barcode resolution, then map to FatSecret search
+    try {
+        const openFoodFactsInfo = await findOpenFoodFactsInfoByBarcode(digits);
+        if (openFoodFactsInfo) {
+            const candidates = buildOpenFoodFactsCandidates(openFoodFactsInfo);
+            let bestMatch: FatSecretProduct | null = null;
+            let bestScore = -1;
+
+            for (const candidate of candidates) {
+                const matches = await searchFatSecretFoods(candidate, 8);
+                for (const match of matches) {
+                    const score = scoreFatSecretMatch(match, openFoodFactsInfo);
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestMatch = match;
+                    }
+                }
+            }
+
+            if (bestMatch) {
+                return bestMatch;
+            }
         }
     } catch {
         // ignore
