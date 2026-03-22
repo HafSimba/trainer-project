@@ -22,6 +22,7 @@ type AllergyChoice = '' | 'nessuna' | 'presenti';
 
 type OnboardingFormData = {
     username: string;
+    obiettivoPersonale: string;
     altezza: string;
     eta: string;
     sesso: string;
@@ -39,6 +40,7 @@ type OnboardingFormData = {
 
 const INITIAL_FORM_DATA: OnboardingFormData = {
     username: '',
+    obiettivoPersonale: '',
     altezza: '',
     eta: '',
     sesso: '',
@@ -75,6 +77,7 @@ function getInteractiveProgress(currentStep: Step): number {
 function buildGeneratePlanPayload(formData: OnboardingFormData) {
     return {
         username: formData.username.trim(),
+        obiettivoPersonale: formData.obiettivoPersonale.trim(),
         eta: Number(formData.eta),
         sesso: formData.sesso,
         altezzaCm: Number(formData.altezza),
@@ -173,8 +176,9 @@ export default function Onboarding() {
     const interactiveProgress = useMemo(() => getInteractiveProgress(step), [step]);
 
     const validateStep = (currentStep: Step) => {
-        if (currentStep === 0 && !formData.username.trim()) {
-            return 'Inserisci il tuo nome per iniziare.';
+        if (currentStep === 0) {
+            if (!formData.username.trim()) return 'Inserisci il tuo nome per iniziare.';
+            if (!formData.obiettivoPersonale.trim()) return 'Descrivi brevemente il tuo obiettivo.';
         }
 
         if (currentStep === 1) {
@@ -291,6 +295,19 @@ export default function Onboarding() {
                                         onChange={handleChange}
                                         placeholder="Es: Mario"
                                         autoFocus
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="text-sm font-semibold mb-1 block">Qual è il tuo obiettivo con TrAIner?</label>
+                                    <textarea
+                                        required
+                                        name="obiettivoPersonale"
+                                        value={formData.obiettivoPersonale}
+                                        onChange={handleChange as unknown as React.ChangeEventHandler<HTMLTextAreaElement>}
+                                        placeholder="Es: Voglio rimettermi in forma per l'estate, voglio correre una maratona tra 6 mesi..."
+                                        className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                                        rows={3}
                                     />
                                 </div>
                             </section>

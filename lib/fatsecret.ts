@@ -535,12 +535,12 @@ async function fatSecretGet(path: string, params: Record<string, string | number
 function extractFoodId(raw: unknown): string | null {
     if (typeof raw === 'string' || typeof raw === 'number') {
         const id = String(raw).trim();
-        return id ? id : null;
+        return id && id !== '0' ? id : null;
     }
 
     if (isRecord(raw) && (typeof raw.value === 'string' || typeof raw.value === 'number')) {
         const id = String(raw.value).trim();
-        return id ? id : null;
+        return id && id !== '0' ? id : null;
     }
 
     return null;

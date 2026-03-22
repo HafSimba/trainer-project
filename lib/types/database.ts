@@ -97,6 +97,7 @@ export interface UserPersonalInfo {
 
 export interface OnboardingInput {
     name: string;
+    specific_goal?: string;
     age: number;
     gender: OnboardingGender;
     height_cm: number;

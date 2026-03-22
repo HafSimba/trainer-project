@@ -35,6 +35,7 @@ type AllowedGender = typeof ALLOWED_GENDERS[number];
 
 type CanonicalOnboardingInput = {
     name: string;
+    specific_goal: string;
     age: number;
     gender: AllowedGender;
     height_cm: number;
@@ -498,6 +499,7 @@ function validateAndBuildCanonicalInput(body: unknown): CanonicalValidationResul
     const source = isRecord(body) ? body : {};
 
     const username = normalizeString(source.username);
+    const specificGoal = normalizeString(source.obiettivoPersonale);
     const rawGender = normalizeString(source.sesso);
     const rawLevel = normalizeString(source.livelloAttuale);
     const rawGoal = normalizeString(source.obiettivoPrimario);
@@ -516,6 +518,10 @@ function validateAndBuildCanonicalInput(body: unknown): CanonicalValidationResul
 
     if (!username) {
         return { ok: false, error: 'Il campo nome è obbligatorio' };
+    }
+
+    if (!specificGoal) {
+        return { ok: false, error: 'Il campo obiettivo personale è obbligatorio' };
     }
 
     if (!isOneOf(rawGender, ALLOWED_GENDERS)) {
@@ -584,6 +590,7 @@ function validateAndBuildCanonicalInput(body: unknown): CanonicalValidationResul
         ok: true,
         canonicalInput: {
             name: username,
+            specific_goal: specificGoal,
             age,
             gender: rawGender,
             height_cm: heightCm,
@@ -605,6 +612,7 @@ function validateAndBuildCanonicalInput(body: unknown): CanonicalValidationResul
 
 function buildCommonContext(input: CanonicalOnboardingInput): string {
     return `Nome: ${input.name}
+Obiettivo Personale Specifico: ${input.specific_goal}
 Età: ${input.age}
 Sesso: ${input.gender}
 Altezza: ${input.height_cm} cm
