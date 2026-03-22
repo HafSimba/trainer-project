@@ -236,21 +236,29 @@ export function BarcodeScanner({
         try {
             const res = await fetch(`/api/fatsecret/barcode?barcode=${encodeURIComponent(barcode)}`);
             const rawText = await res.text();
-            const data = parseJsonSafe<{ product?: ProductInfo; error?: string }>(rawText);
 
-            if (!res.ok || !data || (!data.product && data.error)) {
-                throw new Error(data?.error || `Prodotto non trovato (HTTP ${res.status})`);
+            let data: { product?: ProductInfo; error?: string } | null = null;
+            try {
+                data = JSON.parse(rawText);
+            } catch (e) {
+                throw new Error(`Risposta non valida dal server (HTTP ${res.status})`);
+            }
+
+            if (!data) throw new Error("Risposta vuota");
+
+            if (!res.ok || (!data.product && data.error)) {
+                throw new Error(data.error || `Prodotto non trovato (HTTP ${res.status})`);
             }
 
             if (!data.product) {
-                throw new Error(`Prodotto non trovato o risposta vuota.`);
+                throw new Error(`Prodotto non trovato o dati mancanti.`);
             }
 
             onProductFound(data.product);
         } catch (error: unknown) {
             setError(getErrorMessage(error));
-            lastDetectedBarcodeRef.current = null;
-            setScanning(true);
+            // Do NOT immediately reset the last detected code nor start scanning again automatically. 
+            // The user must manually click to restart or try another product
         } finally {
             setLoading(false);
         }
