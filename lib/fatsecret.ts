@@ -293,6 +293,7 @@ function mapPathToOAuth1Method(path: string): string | null {
     if (path === '/foods/search/v5') return 'foods.search.v5';
     if (path === '/food/v5') return 'food.get.v5';
     if (path === '/food/barcode/find-by-id/v1') return 'food.find_id_for_barcode';
+    if (path === '/food/barcode/find-by-id/v2') return 'food.find_id_for_barcode.v2';
     return null;
 }
 
@@ -872,45 +873,93 @@ function normalizeBarcodeToGtin13(barcode: string): string | null {
     return digits;
 }
 
+function getBarcodeLookupRegions(): string[] {
+    const defaultRegions = ['IT', 'ES', 'FR', 'US'];
+    const configured = sanitizeEnvValue(process.env.FAT_SECRET_BARCODE_REGIONS)
+        .split(',')
+        .map((region) => region.trim().toUpperCase())
+        .filter((region) => /^[A-Z]{2}$/.test(region));
+
+    const merged = configured.length > 0 ? configured : defaultRegions;
+    if (!merged.includes('US')) {
+        merged.push('US');
+    }
+
+    return Array.from(new Set(merged));
+}
+
+function isFatSecretBarcodeNotFoundError(error: unknown): boolean {
+    if (!(error instanceof Error)) return false;
+
+    const message = error.message.toLowerCase();
+    return (
+        message.includes('211') ||
+        message.includes('invalid id') ||
+        message.includes('check your food_id') ||
+        message.includes('not found')
+    );
+}
+
+function buildBarcodeCandidates(digits: string): string[] {
+    const candidates = [digits];
+
+    if (digits.length <= 13) {
+        candidates.unshift(digits.padStart(13, '0'));
+    }
+
+    return Array.from(new Set(candidates.filter(Boolean)));
+}
+
+async function lookupFatSecretBarcodeV2(barcode: string, region: string): Promise<FatSecretProduct | null> {
+    const payload = await fatSecretGet(
+        '/food/barcode/find-by-id/v2',
+        { barcode, region },
+        'barcode'
+    );
+
+    const detail = extractFoodDetails(payload);
+    if (!detail) {
+        return null;
+    }
+
+    const normalized = normalizeProduct(detail, detail);
+    if (normalized) {
+        return normalized;
+    }
+
+    const foodId = extractFoodId(detail.food_id);
+    if (!foodId) {
+        return null;
+    }
+
+    const fullDetail = await getFoodById(foodId, 'barcode');
+    return fullDetail ? normalizeProduct(fullDetail, fullDetail) : null;
+}
+
 export async function findFatSecretFoodByBarcode(barcode: string): Promise<FatSecretProduct | null> {
     const digits = normalizeBarcodeToGtin13(barcode);
     if (!digits) {
         return null;
     }
 
-    // Try GTIN-13 padded version first
-    const gtin13 = digits.length <= 13 ? digits.padStart(13, '0') : digits;
+    const barcodeCandidates = buildBarcodeCandidates(digits);
+    const barcodeRegions = getBarcodeLookupRegions();
 
-    try {
-        const payload = await fatSecretGet(
-            '/food/barcode/find-by-id/v1',
-            { barcode: gtin13 },
-            'basic barcode'
-        );
-
-        const responseRecord = isRecord(payload) ? payload : null;
-        let foodId = extractFoodId(responseRecord?.food_id);
-
-        // Se non trova con gtin13, e il barcode originale era diverso, proviamo con quello originale
-        if (!foodId && digits !== gtin13) {
-            const payloadOrig = await fatSecretGet(
-                '/food/barcode/find-by-id/v1',
-                { barcode: digits },
-                'basic barcode'
-            );
-            const responseRecordOrig = isRecord(payloadOrig) ? payloadOrig : null;
-            foodId = extractFoodId(responseRecordOrig?.food_id);
-        }
-
-        if (foodId) {
-            const detail = await getFoodById(foodId, 'basic barcode');
-            if (detail) {
-                const product = normalizeProduct(detail, detail);
-                if (product) return product;
+    for (const barcodeCandidate of barcodeCandidates) {
+        for (const region of barcodeRegions) {
+            try {
+                const directProduct = await lookupFatSecretBarcodeV2(barcodeCandidate, region);
+                if (directProduct) {
+                    return directProduct;
+                }
+            } catch (error) {
+                if (!isFatSecretBarcodeNotFoundError(error)) {
+                    // Continue with the remaining compatibility fallbacks.
+                    // Some environments return heterogeneous errors for the same barcode.
+                    continue;
+                }
             }
         }
-    } catch {
-        // ignore crash on find-by-id and fallback to search
     }
 
     // Fallback: search by barcode text across the database
