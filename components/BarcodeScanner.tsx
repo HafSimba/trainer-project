@@ -44,6 +44,21 @@ interface ProductInfo {
         carbohydrates_100g?: number;
         fat_100g?: number;
     };
+    serving_options?: Array<{
+        serving_id: string;
+        label: string;
+        number_of_units: number;
+        measurement_description?: string;
+        metric_serving_amount?: number;
+        metric_serving_unit?: string;
+        is_default: boolean;
+        nutriments: {
+            calories: number;
+            proteins_g: number;
+            carbohydrates_g: number;
+            fats_g: number;
+        };
+    }>;
     brands?: string;
 }
 

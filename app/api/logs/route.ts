@@ -2,13 +2,14 @@
 import clientPromise from '@/lib/mongodb';
 import { DailyLog } from '@/lib/types/database';
 
-type LogAction = 'add_meal' | 'delete_meal' | 'edit_meal' | 'update_water';
+type LogAction = 'add_meal' | 'add_meals' | 'delete_meal' | 'edit_meal' | 'update_water';
 
 type LogRequestBody = {
     userId?: string;
     date?: string;
     action?: LogAction;
     meal?: DailyLog['meals_log'][number];
+    meals?: DailyLog['meals_log'];
     water_ml?: number;
 };
 
@@ -38,7 +39,7 @@ function missingParamsError() {
 export async function POST(req: Request) {
     try {
         const body = await req.json() as LogRequestBody;
-        const { userId, date, action = 'add_meal', meal, water_ml } = body;
+        const { userId, date, action = 'add_meal', meal, meals, water_ml } = body;
 
         if (!userId || !date) {
             return missingParamsError();
@@ -50,6 +51,35 @@ export async function POST(req: Request) {
             const doc = await collection.findOne({ userId, date });
             const currentMeals = doc?.meals_log || [];
             const updatedMeals = [...currentMeals, meal];
+            const totals = recalculateTotals(updatedMeals);
+
+            const updateResult = await collection.findOneAndUpdate(
+                { userId, date },
+                {
+                    $setOnInsert: {
+                        userId,
+                        date,
+                        metrics: {},
+                        training_log: [],
+                        "daily_nutrition_summary.water_intake_ml": 0
+                    },
+                    $set: {
+                        meals_log: updatedMeals,
+                        "daily_nutrition_summary.total_calories": totals.total_calories,
+                        "daily_nutrition_summary.total_proteins_g": totals.total_proteins_g,
+                        "daily_nutrition_summary.total_carbs_g": totals.total_carbs_g,
+                        "daily_nutrition_summary.total_fats_g": totals.total_fats_g,
+                    }
+                },
+                { upsert: true, returnDocument: 'after' }
+            );
+            return NextResponse.json({ success: true, log: updateResult });
+        }
+
+        if (action === 'add_meals' && Array.isArray(meals) && meals.length > 0) {
+            const doc = await collection.findOne({ userId, date });
+            const currentMeals = doc?.meals_log || [];
+            const updatedMeals = [...currentMeals, ...meals];
             const totals = recalculateTotals(updatedMeals);
 
             const updateResult = await collection.findOneAndUpdate(

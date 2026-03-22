@@ -1,15 +1,14 @@
 ﻿'use client';
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { PieChart, Pie, Cell } from "recharts";
-import { Plus, Search, Camera, Droplets, Trash2, Loader2, Pencil } from "lucide-react";
+import { Plus, Droplets, Trash2, Loader2, Pencil } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { BarcodeScanner } from "@/components/BarcodeScanner";
-import { v4 as uuidv4 } from "uuid";
 import type { DailyLog, Meal } from "@/lib/types/database";
 
 const PROTOTYPE_USER_ID = "tester-user-123";
@@ -18,22 +17,6 @@ const DEFAULT_DAILY_CALORIE_GOAL = 2400;
 type MealType = 'colazione' | 'pranzo' | 'cena' | 'snack';
 type EditMacros = { calories: number; carbs_g: number; proteins_g: number; fats_g: number };
 type ProfileApiResponse = { targets?: { daily_calories?: number } };
-
-type OpenFoodNutriments = {
-  'energy-kcal_100g'?: number;
-  'energy-kcal'?: number;
-  energy_100g?: number;
-  proteins_100g?: number;
-  carbohydrates_100g?: number;
-  fat_100g?: number;
-};
-
-type OpenFoodProduct = {
-  food_id?: string;
-  product_name?: string;
-  brands?: string;
-  nutriments?: OpenFoodNutriments;
-};
 
 const DEFAULT_EDIT_MACROS: EditMacros = { calories: 0, carbs_g: 0, proteins_g: 0, fats_g: 0 };
 
@@ -76,39 +59,13 @@ async function postLogAction(payload: Record<string, unknown>) {
   });
 }
 
-function parseJsonSafe<T>(text: string): T | null {
-  if (!text) return null;
-
-  try {
-    return JSON.parse(text) as T;
-  } catch {
-    return null;
-  }
-}
-
 export default function Diary() {
+  const router = useRouter();
   const [log, setLog] = useState<DailyLog | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isChartMounted, setIsChartMounted] = useState(false);
   const [waterGlasses, setWaterGlasses] = useState(0);
   const [dailyCalorieGoal, setDailyCalorieGoal] = useState(DEFAULT_DAILY_CALORIE_GOAL);
-
-  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const [selectedMealType, setSelectedMealType] = useState<MealType>('colazione');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<OpenFoodProduct[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [showScanner, setShowScanner] = useState(false);
-
-  const [selectedProduct, setSelectedProduct] = useState<OpenFoodProduct | null>(null);
-  const [servingQty, setServingQty] = useState<number>(100);
-
-  const getProductCaloriesPer100g = (product: OpenFoodProduct | null) => (
-    product?.nutriments?.['energy-kcal_100g']
-    || product?.nutriments?.['energy-kcal']
-    || (product?.nutriments?.energy_100g ? product.nutriments.energy_100g / 4.184 : 0)
-    || 0
-  );
 
   const fetchTodayData = async () => {
     setIsLoading(true);
@@ -144,74 +101,22 @@ export default function Diary() {
   };
 
   useEffect(() => {
-    setIsChartMounted(true);
+    const chartTimer = setTimeout(() => {
+      setIsChartMounted(true);
+    }, 0);
 
-    const timer = setTimeout(() => {
+    const dataTimer = setTimeout(() => {
       void fetchTodayData();
     }, 0);
 
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(chartTimer);
+      clearTimeout(dataTimer);
+    };
   }, []);
 
-  const handleSearch = async () => {
-    if (!searchQuery.trim()) return;
-    setIsSearching(true);
-    setShowScanner(false);
-    try {
-      const res = await fetch('/api/fatsecret/search?q=' + encodeURIComponent(searchQuery) + '&limit=10');
-      const rawText = await res.text();
-      const data = parseJsonSafe<{ products?: OpenFoodProduct[]; error?: string }>(rawText);
-
-      if (!res.ok) {
-        throw new Error(data?.error || `Errore durante la ricerca alimenti (HTTP ${res.status})`);
-      }
-
-      if (!data) {
-        throw new Error('Risposta non valida dal server di ricerca alimenti.');
-      }
-
-      setSearchResults(data.products || []);
-    } catch (error) {
-      console.error(error);
-      setSearchResults([]);
-    }
-    setIsSearching(false);
-  };
-
   const openAddDialog = (type: MealType) => {
-    setSelectedMealType(type);
-    setSelectedProduct(null);
-    setSearchQuery('');
-    setSearchResults([]);
-    setShowScanner(false);
-    setServingQty(100);
-    setIsAddDialogOpen(true);
-  };
-
-  const confirmAddingProduct = async () => {
-    if (!selectedProduct) return;
-    const ratio = servingQty / 100;
-
-    const meal = {
-      id: uuidv4(),
-      time: new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }),
-      meal_type: selectedMealType,
-      name: selectedProduct.product_name || 'Prodotto Variato',
-      calories: (getProductCaloriesPer100g(selectedProduct) * ratio),
-      proteins_g: ((selectedProduct.nutriments?.proteins_100g || 0) * ratio),
-      carbs_g: ((selectedProduct.nutriments?.carbohydrates_100g || 0) * ratio),
-      fats_g: ((selectedProduct.nutriments?.fat_100g || 0) * ratio)
-    };
-
-    setIsAddDialogOpen(false);
-
-    try {
-      const today = getTodayDate();
-      await postLogAction({ userId: PROTOTYPE_USER_ID, date: today, meal });
-      fetchTodayData();
-    } catch (e) {
-      console.error(e);
-    }
+    router.push(`/diary/search?meal_type=${encodeURIComponent(type)}`);
   };
 
   const rawSummary = log?.daily_nutrition_summary;
@@ -428,77 +333,6 @@ export default function Diary() {
           Powered by FatSecret
         </a>
       </div>
-
-      <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-        <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto w-11/12 rounded-xl">
-          <DialogHeader>
-            <DialogTitle style={{ textTransform: 'capitalize' }}>Aggiungi a {selectedMealType}</DialogTitle>
-          </DialogHeader>
-
-          {!selectedProduct ? (
-            <div className="flex flex-col gap-4 mt-2">
-              <div className="flex gap-2">
-                <Input
-                  placeholder="Cerca alimento..."
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && handleSearch()}
-                />
-                <Button onClick={handleSearch} disabled={isSearching} size="icon">
-                  {isSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-                </Button>
-                <Button onClick={() => setShowScanner(!showScanner)} variant="secondary" size="icon">
-                  <Camera className="w-4 h-4" />
-                </Button>
-              </div>
-
-              {showScanner && (
-                <div className="bg-black rounded-lg overflow-hidden">
-                  <BarcodeScanner onProductFound={setSelectedProduct} />
-                </div>
-              )}
-
-              <div className="space-y-2">
-                {searchResults.map((item, idx) => (
-                  <Card key={idx} className="cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors" onClick={() => setSelectedProduct(item)}>
-                    <CardContent className="p-3 flex justify-between items-center">
-                      <div>
-                        <p className="font-medium text-sm line-clamp-1">{item.product_name}</p>
-                        <p className="text-xs text-gray-500">{item.brands}</p>
-                      </div>
-                      <span className="text-xs font-semibold bg-gray-100 px-2 py-1 rounded w-fit text-nowrap ml-2 shrink-0">
-                        {Math.round(getProductCaloriesPer100g(item))} kcal/100g
-                      </span>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="flex flex-col gap-4 mt-4">
-              <div className="text-center mb-2">
-                <h3 className="font-bold text-lg">{selectedProduct.product_name}</h3>
-                <p className="text-sm text-gray-500 mb-4">{Math.round(getProductCaloriesPer100g(selectedProduct))} kcal per 100g</p>
-
-                <label className="text-sm font-semibold mb-2 block">Quantità mangiata (in grammi o ml)</label>
-                <Input type="number" value={servingQty} onChange={(e) => setServingQty(Number(e.target.value))} className="text-center text-xl" />
-              </div>
-
-              <div className="bg-gray-50 p-4 rounded-xl flex justify-between text-sm shadow-inner">
-                <div className="flex flex-col items-center"><span className="font-bold text-blue-500">{Math.round(((selectedProduct.nutriments?.carbohydrates_100g || 0) * servingQty / 100))}g</span>Carbo</div>
-                <div className="flex flex-col items-center"><span className="font-bold text-red-500">{Math.round(((selectedProduct.nutriments?.proteins_100g || 0) * servingQty / 100))}g</span>Pro</div>
-                <div className="flex flex-col items-center"><span className="font-bold text-amber-500">{Math.round(((selectedProduct.nutriments?.fat_100g || 0) * servingQty / 100))}g</span>Grassi</div>
-                <div className="flex flex-col items-center"><span className="font-bold text-black">{Math.round((getProductCaloriesPer100g(selectedProduct) * servingQty / 100))}</span>kcal</div>
-              </div>
-
-              <div className="flex gap-2 mt-4">
-                <Button variant="outline" onClick={() => setSelectedProduct(null)} className="flex-1">Indietro</Button>
-                <Button onClick={confirmAddingProduct} className="flex-1 bg-green-600 hover:bg-green-700">Conferma</Button>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
       <Dialog open={isEditModalOpen} onOpenChange={(open) => {
         setIsEditModalOpen(open);
         if (!open) setEditingMeal(null);

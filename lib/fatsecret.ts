@@ -3,7 +3,6 @@ import { createHmac, randomBytes } from 'node:crypto';
 const FAT_SECRET_OAUTH_URL = 'https://oauth.fatsecret.com/connect/token';
 const FAT_SECRET_API_BASE_URL = 'https://platform.fatsecret.com/rest';
 const FAT_SECRET_METHOD_API_URL = 'https://platform.fatsecret.com/rest/server.api';
-const OPEN_FOOD_FACTS_BASE_URL = 'https://world.openfoodfacts.org';
 const TOKEN_EXPIRY_BUFFER_MS = 60_000;
 const OAUTH1_SIGNATURE_METHOD = 'HMAC-SHA1';
 const OAUTH1_VERSION = '1.0';
@@ -28,8 +27,12 @@ type TokenCache = {
 
 type FatSecretRawServing = {
     serving_id?: string | number;
+    serving_description?: string;
+    serving_url?: string;
     metric_serving_amount?: string | number;
     metric_serving_unit?: string;
+    number_of_units?: string | number;
+    measurement_description?: string;
     calories?: string | number;
     carbohydrate?: string | number;
     protein?: string | number;
@@ -47,23 +50,6 @@ type FatSecretRawFood = {
     };
 };
 
-type OpenFoodFactsNutriments = {
-    'energy-kcal_100g'?: number | string;
-    'energy-kcal'?: number | string;
-    energy_100g?: number | string;
-    proteins_100g?: number | string;
-    carbohydrates_100g?: number | string;
-    fat_100g?: number | string;
-};
-
-type OpenFoodFactsProduct = {
-    code?: string;
-    _id?: string;
-    product_name?: string;
-    brands?: string;
-    nutriments?: OpenFoodFactsNutriments;
-};
-
 export type FatSecretProduct = {
     food_id: string;
     product_name: string;
@@ -73,6 +59,23 @@ export type FatSecretProduct = {
         proteins_100g: number;
         carbohydrates_100g: number;
         fat_100g: number;
+    };
+    serving_options?: FatSecretServingOption[];
+};
+
+export type FatSecretServingOption = {
+    serving_id: string;
+    label: string;
+    number_of_units: number;
+    measurement_description: string | undefined;
+    metric_serving_amount: number | undefined;
+    metric_serving_unit: string | undefined;
+    is_default: boolean;
+    nutriments: {
+        calories: number;
+        proteins_g: number;
+        carbohydrates_g: number;
+        fats_g: number;
     };
 };
 
@@ -652,103 +655,58 @@ function roundNutriments(nutriments: FatSecretProduct['nutriments']): FatSecretP
     };
 }
 
-function normalizeOpenFoodFactsProduct(product: OpenFoodFactsProduct, fallbackId: string): FatSecretProduct | null {
-    const nutriments = product.nutriments;
-    if (!nutriments || !isRecord(nutriments)) {
-        return null;
-    }
+function mapServingOptions(servings: FatSecretRawServing[]): FatSecretServingOption[] {
+    return servings
+        .map((serving, index) => {
+            const servingId = extractFoodId(serving.serving_id) || `idx-${index}`;
 
-    const kcalFromKj = toNumber(nutriments.energy_100g);
-    const kcal =
-        toNumber(nutriments['energy-kcal_100g']) ||
-        toNumber(nutriments['energy-kcal']) ||
-        (kcalFromKj > 0 ? kcalFromKj / 4.184 : 0);
+            const calories = Math.max(0, toNumber(serving.calories));
+            const proteins = Math.max(0, toNumber(serving.protein));
+            const carbs = Math.max(0, toNumber(serving.carbohydrate));
+            const fats = Math.max(0, toNumber(serving.fat));
 
-    const normalized = roundNutriments({
-        'energy-kcal_100g': kcal,
-        proteins_100g: toNumber(nutriments.proteins_100g),
-        carbohydrates_100g: toNumber(nutriments.carbohydrates_100g),
-        fat_100g: toNumber(nutriments.fat_100g),
-    });
+            const hasNutrients = calories > 0 || proteins > 0 || carbs > 0 || fats > 0;
+            if (!hasNutrients) {
+                return null;
+            }
 
-    const hasValues =
-        normalized['energy-kcal_100g'] > 0 ||
-        normalized.proteins_100g > 0 ||
-        normalized.carbohydrates_100g > 0 ||
-        normalized.fat_100g > 0;
+            const metricServingAmount = toNumber(serving.metric_serving_amount);
+            const metricServingUnit = (serving.metric_serving_unit || '').trim().toLowerCase();
+            const numberOfUnits = toNumber(serving.number_of_units);
+            const measurementDescription = (serving.measurement_description || '').trim();
+            const servingDescription = (serving.serving_description || '').trim();
 
-    if (!hasValues) {
-        return null;
-    }
+            const metricLabel = metricServingAmount > 0 && metricServingUnit
+                ? `${Number(metricServingAmount.toFixed(2))} ${metricServingUnit}`
+                : '';
 
-    return {
-        food_id: `off:${product.code || product._id || fallbackId}`,
-        product_name: product.product_name || 'Prodotto OpenFoodFacts',
-        brands: product.brands || '',
-        nutriments: normalized,
-    };
-}
+            const fallbackLabel = measurementDescription
+                ? `${numberOfUnits > 0 ? Number(numberOfUnits.toFixed(2)) : 1} ${measurementDescription}`.trim()
+                : 'Porzione';
 
-async function fetchJsonWithTimeout(url: string, timeoutMs = 8000): Promise<unknown | null> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+            const baseLabel = servingDescription || fallbackLabel;
+            const label = metricLabel && !baseLabel.toLowerCase().includes(metricLabel.toLowerCase())
+                ? `${baseLabel} (${metricLabel})`
+                : baseLabel;
 
-    try {
-        const response = await fetch(url, {
-            method: 'GET',
-            cache: 'no-store',
-            signal: controller.signal,
-            headers: {
-                Accept: 'application/json, text/plain, */*',
-            },
-        });
-
-        if (!response.ok) return null;
-
-        const text = await response.text();
-        if (!text) return null;
-
-        try {
-            return JSON.parse(text);
-        } catch {
-            return null;
-        }
-    } catch {
-        return null;
-    } finally {
-        clearTimeout(timeout);
-    }
-}
-
-async function searchOpenFoodFactsFoods(query: string, limit: number): Promise<FatSecretProduct[]> {
-    const url = `${OPEN_FOOD_FACTS_BASE_URL}/cgi/search.pl?search_terms=${encodeURIComponent(query)}&search_simple=1&action=process&json=1&page_size=${limit}`;
-    const payload = await fetchJsonWithTimeout(url);
-
-    if (!isRecord(payload) || !Array.isArray(payload.products)) {
-        return [];
-    }
-
-    return payload.products
-        .slice(0, limit)
-        .map((rawProduct, index) => {
-            if (!isRecord(rawProduct)) return null;
-            return normalizeOpenFoodFactsProduct(rawProduct as OpenFoodFactsProduct, `${query}-${index}`);
+            return {
+                serving_id: servingId,
+                label,
+                number_of_units: numberOfUnits > 0 ? Number(numberOfUnits.toFixed(2)) : 1,
+                measurement_description: measurementDescription || undefined,
+                metric_serving_amount: metricServingAmount > 0 ? Number(metricServingAmount.toFixed(2)) : undefined,
+                metric_serving_unit: metricServingUnit || undefined,
+                is_default: toNumber(serving.is_default) === 1,
+                nutriments: {
+                    calories: Number(calories.toFixed(2)),
+                    proteins_g: Number(proteins.toFixed(2)),
+                    carbohydrates_g: Number(carbs.toFixed(2)),
+                    fats_g: Number(fats.toFixed(2)),
+                },
+            };
         })
-        .filter((product): product is FatSecretProduct => !!product);
-}
-
-async function findOpenFoodFactsFoodByBarcode(barcode: string): Promise<FatSecretProduct | null> {
-    const normalizedBarcode = normalizeBarcodeToGtin13(barcode);
-    if (!normalizedBarcode) return null;
-
-    const url = `${OPEN_FOOD_FACTS_BASE_URL}/api/v2/product/${encodeURIComponent(normalizedBarcode)}`;
-    const payload = await fetchJsonWithTimeout(url);
-
-    if (!isRecord(payload) || Number(payload.status) !== 1 || !isRecord(payload.product)) {
-        return null;
-    }
-
-    return normalizeOpenFoodFactsProduct(payload.product as OpenFoodFactsProduct, normalizedBarcode);
+        .filter((option): option is FatSecretServingOption => !!option)
+        .sort((a, b) => Number(b.is_default) - Number(a.is_default));
 }
 
 function normalizeProduct(food: FatSecretRawFood, detail: FatSecretRawFood | null): FatSecretProduct | null {
@@ -756,6 +714,7 @@ function normalizeProduct(food: FatSecretRawFood, detail: FatSecretRawFood | nul
     if (!foodId) return null;
 
     const servings = getServings(detail || food);
+    const servingOptions = mapServingOptions(servings);
     const chosenServing = chooseServing(servings);
 
     const servingNutriments = servingToNutriments(chosenServing);
@@ -773,6 +732,7 @@ function normalizeProduct(food: FatSecretRawFood, detail: FatSecretRawFood | nul
         product_name: detail?.food_name || food.food_name || 'Prodotto FatSecret',
         brands: detail?.brand_name || food.brand_name || '',
         nutriments,
+        serving_options: servingOptions.length > 0 ? servingOptions : undefined,
     };
 }
 
@@ -784,45 +744,36 @@ async function getFoodById(foodId: string, scope = 'basic'): Promise<FatSecretRa
 export async function searchFatSecretFoods(query: string, limit = 10): Promise<FatSecretProduct[]> {
     const normalizedLimit = Math.min(Math.max(limit, 1), 20);
 
-    try {
-        const payload = await fatSecretGet(
-            '/foods/search/v1',
-            {
-                search_expression: query,
-                max_results: normalizedLimit,
-                page_number: 0,
-            },
-            'basic'
-        );
+    const payload = await fatSecretGet(
+        '/foods/search/v1',
+        {
+            search_expression: query,
+            max_results: normalizedLimit,
+            page_number: 0,
+        },
+        'basic'
+    );
 
-        const foods = extractSearchFoods(payload);
+    const foods = extractSearchFoods(payload);
 
-        const enriched = await Promise.all(
-            foods.slice(0, normalizedLimit).map(async (food) => {
-                const foodId = extractFoodId(food.food_id);
-                if (!foodId) return normalizeProduct(food, null);
+    const enriched = await Promise.all(
+        foods.slice(0, normalizedLimit).map(async (food) => {
+            const foodId = extractFoodId(food.food_id);
+            if (!foodId) return normalizeProduct(food, null);
 
-                try {
-                    const detail = await getFoodById(foodId, 'basic');
-                    return normalizeProduct(food, detail);
-                } catch {
-                    return normalizeProduct(food, null);
-                }
-            })
-        );
+            try {
+                const detail = await getFoodById(foodId, 'basic');
+                return normalizeProduct(food, detail);
+            } catch {
+                return normalizeProduct(food, null);
+            }
+        })
+    );
 
-        const products = enriched.filter((item): item is FatSecretProduct => !!item);
-        if (products.length > 0) {
-            return products;
-        }
-    } catch (error) {
-        console.error('FatSecret search failed, trying OpenFoodFacts fallback:', error);
-    }
-
-    return searchOpenFoodFactsFoods(query, normalizedLimit);
+    return enriched.filter((item): item is FatSecretProduct => !!item);
 }
 
-export function normalizeBarcodeToGtin13(barcode: string): string | null {
+function normalizeBarcodeToGtin13(barcode: string): string | null {
     const digits = barcode.replace(/\D/g, '');
     if (!digits) return null;
     if (digits.length > 13) return null;
@@ -835,26 +786,23 @@ export async function findFatSecretFoodByBarcode(barcode: string): Promise<FatSe
         return null;
     }
 
-    try {
-        const payload = await fatSecretGet(
-            '/food/barcode/find-by-id/v1',
-            { barcode: normalizedBarcode },
-            'basic barcode'
-        );
+    const payload = await fatSecretGet(
+        '/food/barcode/find-by-id/v1',
+        { barcode: normalizedBarcode },
+        'basic barcode'
+    );
 
-        const responseRecord = isRecord(payload) ? payload : null;
-        const foodId = extractFoodId(responseRecord?.food_id);
+    const responseRecord = isRecord(payload) ? payload : null;
+    const foodId = extractFoodId(responseRecord?.food_id);
 
-        if (!foodId) {
-            return findOpenFoodFactsFoodByBarcode(normalizedBarcode);
-        }
-
-        const detail = await getFoodById(foodId, 'basic barcode');
-        if (!detail) return findOpenFoodFactsFoodByBarcode(normalizedBarcode);
-
-        return normalizeProduct(detail, detail);
-    } catch (error) {
-        console.error('FatSecret barcode failed, trying OpenFoodFacts fallback:', error);
-        return findOpenFoodFactsFoodByBarcode(normalizedBarcode);
+    if (!foodId) {
+        return null;
     }
+
+    const detail = await getFoodById(foodId, 'basic barcode');
+    if (!detail) {
+        return null;
+    }
+
+    return normalizeProduct(detail, detail);
 }
