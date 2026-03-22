@@ -238,8 +238,12 @@ export function BarcodeScanner({
             const rawText = await res.text();
             const data = parseJsonSafe<{ product?: ProductInfo; error?: string }>(rawText);
 
-            if (!res.ok || !data?.product) {
-                throw new Error(data?.error || `Prodotto non trovato su FatSecret (HTTP ${res.status})`);
+            if (!res.ok || !data || (!data.product && data.error)) {
+                throw new Error(data?.error || `Prodotto non trovato (HTTP ${res.status})`);
+            }
+
+            if (!data.product) {
+                throw new Error(`Prodotto non trovato o risposta vuota.`);
             }
 
             onProductFound(data.product);

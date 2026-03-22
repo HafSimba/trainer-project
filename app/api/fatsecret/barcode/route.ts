@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
         const product = await findFatSecretFoodByBarcode(barcode);
 
         if (!product) {
-            return NextResponse.json({ error: 'Prodotto non trovato per questo barcode.' }, { status: 404 });
+            return NextResponse.json({ error: 'Prodotto non trovato per questo barcode.', product: null }, { status: 404 });
         }
 
         return NextResponse.json({ product });
