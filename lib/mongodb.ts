@@ -16,7 +16,7 @@ let clientPromise: Promise<MongoClient>;
 if (process.env.NODE_ENV === 'development') {
     // In development, utilizza una variabile globale per preservare 
     // il valore attraverso i ricaricamenti a caldo (HMR) del modulo.
-    let globalWithMongo = global as typeof globalThis & {
+    const globalWithMongo = global as typeof globalThis & {
         _mongoClientPromise?: Promise<MongoClient>;
     };
 

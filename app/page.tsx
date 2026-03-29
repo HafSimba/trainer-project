@@ -6,16 +6,71 @@ import { useState, useEffect } from "react";
 import { Progress } from "@/components/ui/progress";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-
-const PROTOTYPE_USER_ID = "tester-user-123";
+import { PROTOTYPE_USER_ID } from "@/lib/config/user";
 
 // Mappiamo gli indici di JS ai giorni della settimana in Italiano usati dall'AI
 const DAYS_OF_WEEK = ["Domenica", "Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato"];
 
+type DailySummary = {
+    calories: number;
+    proteins: number;
+    carbs: number;
+    fats: number;
+};
+
+type DashboardWorkoutDay = {
+    day_name?: string;
+    workout_type?: string;
+    exercises?: unknown[];
+};
+
+type DashboardDietMeals = {
+    colazione?: string[];
+    pranzo?: string[];
+    snack?: string[];
+    cena?: string[];
+};
+
+type DashboardProfile = {
+    name?: string;
+    targets?: {
+        daily_calories?: number;
+        daily_carbs_g?: number;
+        daily_protein_g?: number;
+        daily_fats_g?: number;
+    };
+    workout_plan?: {
+        schedule?: DashboardWorkoutDay[];
+    };
+    diet_plan?: {
+        weekly_schedule?: Array<{
+            day_name?: string;
+            meals?: DashboardDietMeals;
+        }>;
+    };
+};
+
+type LogsResponse = {
+    daily_nutrition_summary?: {
+        total_calories?: number;
+        total_proteins_g?: number;
+        total_carbs_g?: number;
+        total_fats_g?: number;
+    };
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return !!value && typeof value === "object";
+}
+
+function isDashboardProfile(value: unknown): value is DashboardProfile {
+    return isRecord(value) && ("workout_plan" in value || "targets" in value || "name" in value || "diet_plan" in value);
+}
+
 export default function Dashboard() {
     const [loading, setLoading] = useState(true);
-    const [profile, setProfile] = useState<any>(null);
-    const [dailySummary, setDailySummary] = useState({
+    const [profile, setProfile] = useState<DashboardProfile | null>(null);
+    const [dailySummary, setDailySummary] = useState<DailySummary>({
         calories: 0,
         proteins: 0,
         carbs: 0,
@@ -23,7 +78,7 @@ export default function Dashboard() {
     });
 
     const [currentDayName, setCurrentDayName] = useState("");
-    const [workoutToday, setWorkoutToday] = useState<any>(null);
+    const [workoutToday, setWorkoutToday] = useState<DashboardWorkoutDay | null>(null);
     const [nextMeal, setNextMeal] = useState<{ name: string, foods: string[] } | null>(null);
 
     useEffect(() => {
@@ -44,8 +99,8 @@ export default function Dashboard() {
                 fetch('/api/profile?userId=' + PROTOTYPE_USER_ID)
             ]);
 
-            const logsData = await logsRes.json();
-            const profileData = await profileRes.json();
+            const logsData = await logsRes.json() as LogsResponse;
+            const profileData = await profileRes.json() as unknown;
 
             // Setto le calorie consumate oggi rispetto al target
             if (logsData && logsData.daily_nutrition_summary) {
@@ -57,19 +112,19 @@ export default function Dashboard() {
                 });
             }
 
-            if (profileData && profileData.workout_plan) {
+            if (isDashboardProfile(profileData) && profileData.workout_plan) {
                 setProfile(profileData);
 
                 // 1. TROVA L'ALLENAMENTO DI OGGI
                 const workout = profileData.workout_plan.schedule?.find(
-                    (s: any) => s.day_name.toLowerCase() === currentDay.toLowerCase()
+                    (scheduleDay) => (scheduleDay.day_name || "").toLowerCase() === currentDay.toLowerCase()
                 );
                 setWorkoutToday(workout || null);
 
                 // 2. TROVA IL PROSSIMO PASTO IN BASE ALL'ORARIO E AL GIORNO ATTUALE
                 if (profileData.diet_plan?.weekly_schedule) {
                     const todaysDiet = profileData.diet_plan.weekly_schedule.find(
-                        (d: any) => d.day_name.toLowerCase() === currentDay.toLowerCase()
+                        (dietDay) => (dietDay.day_name || "").toLowerCase() === currentDay.toLowerCase()
                     );
 
                     if (todaysDiet && todaysDiet.meals) {
@@ -121,7 +176,7 @@ export default function Dashboard() {
             <main className="flex-1 p-6 flex flex-col items-center justify-center gap-6 h-screen text-center">
                 <Zap className="w-16 h-16 text-blue-300 mb-4" />
                 <h1 className="text-2xl font-bold">Nessun Piano Attivo</h1>
-                <p className="text-gray-500 max-w-sm">Configura il tuo profilo per far generare all'intelligenza artificiale la tua dieta e il tuo allenamento.</p>
+                <p className="text-gray-500 max-w-sm">Configura il tuo profilo per far generare all&apos;intelligenza artificiale la tua dieta e il tuo allenamento.</p>
                 <Link href="/onboarding">
                     <Button className="bg-blue-600 hover:bg-blue-700">Inizia Ora</Button>
                 </Link>

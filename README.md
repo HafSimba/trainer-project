@@ -22,6 +22,31 @@ This project uses [`next/font`](https://nextjs.org/docs/app/building-your-applic
 
 ## Environment Variables
 
+### LLM (Ollama)
+
+The app uses an OpenAI-compatible client pointed to Ollama. Configure:
+
+```bash
+# Ollama endpoint (cloud or local)
+# Local default example: http://localhost:11434
+OLLAMA_BASE_URL="https://ollama.com"
+
+# Required for Ollama cloud, optional for local (fallback key: "ollama")
+OLLAMA_API_KEY="<YOUR_OLLAMA_API_KEY>"
+
+# Default chat/generation model
+OLLAMA_MODEL="gemma3:27b"
+
+# Optional: comma-separated fallback models for plan generation
+# LLM_MODELS="gemma3:27b,llama3.1:70b"
+```
+
+Notes:
+
+- `OLLAMA_BASE_URL` is normalized automatically to OpenAI-compatible `/v1`.
+- If `LLM_MODELS` is provided, plan generation retries across the listed models.
+- If `LLM_MODELS` is not provided, generation uses `OLLAMA_MODEL`.
+
 To enable food search and barcode lookup via FatSecret, configure these variables:
 
 ```bash

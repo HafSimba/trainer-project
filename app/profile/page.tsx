@@ -4,8 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { User, Flame, Dumbbell } from 'lucide-react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
+import { PROTOTYPE_USER_ID } from '@/lib/config/user';
 
-const PROTOTYPE_USER_ID = 'tester-user-123';
 export const revalidate = 0;
 
 export default async function Profile() {
@@ -19,7 +19,7 @@ export default async function Profile() {
                 <h1 className="text-2xl font-bold">Nessun Profilo Trovato</h1>
                 <p className="text-gray-500">Non hai ancora configurato un piano personalizzato.</p>
                 <Link href="/onboarding">
-                    <Button>Inizia l'Onboarding</Button>
+                    <Button>Inizia l&apos;Onboarding</Button>
                 </Link>
             </main>
         );
@@ -29,7 +29,7 @@ export default async function Profile() {
         <main className="flex-1 p-4 flex flex-col gap-6 pt-8 pb-24 max-w-lg mx-auto w-full">
             <header className="mb-2">
                 <h1 className="text-3xl font-bold text-gray-900">Ciao, {userProfile.name}</h1>
-                <p className="text-gray-500">Ecco il tuo piano d'azione.</p>
+                <p className="text-gray-500">Ecco il tuo piano d&apos;azione.</p>
             </header>
 
             <div className="grid gap-4">

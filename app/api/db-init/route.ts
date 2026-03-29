@@ -50,10 +50,11 @@ export async function GET() {
                 modified: cleanupResult.modifiedCount,
             },
         });
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error('Errore durante l\'inizializzazione del database:', error);
+        const details = error instanceof Error ? error.message : 'Errore sconosciuto';
         return NextResponse.json(
-            { error: 'Impossibile inizializzare il database', details: error.message },
+            { error: 'Impossibile inizializzare il database', details },
             { status: 500 }
         );
     }

@@ -3,7 +3,7 @@
 const nextConfig: NextConfig = {
   outputFileTracingRoot: process.cwd(),
   typescript: {
-    ignoreBuildErrors: true,
+    ignoreBuildErrors: false,
   }
 };
 

@@ -9,9 +9,10 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { PROTOTYPE_USER_ID } from "@/lib/config/user";
+import { getTodayDate } from "@/lib/utils";
 import type { DailyLog, Meal } from "@/lib/types/database";
 
-const PROTOTYPE_USER_ID = "tester-user-123";
 const DEFAULT_DAILY_CALORIE_GOAL = 2400;
 
 type MealType = 'colazione' | 'pranzo' | 'cena' | 'snack';
@@ -19,10 +20,6 @@ type EditMacros = { calories: number; carbs_g: number; proteins_g: number; fats_
 type ProfileApiResponse = { targets?: { daily_calories?: number } };
 
 const DEFAULT_EDIT_MACROS: EditMacros = { calories: 0, carbs_g: 0, proteins_g: 0, fats_g: 0 };
-
-function getTodayDate(): string {
-  return new Date().toISOString().split('T')[0];
-}
 
 function createEmptyDailyLog(): DailyLog {
   return {

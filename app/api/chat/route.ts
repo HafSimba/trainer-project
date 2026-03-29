@@ -1,22 +1,12 @@
-﻿import { OpenAI } from "openai";
-import clientPromise from "@/lib/mongodb";
+﻿import clientPromise from "@/lib/mongodb";
+import { PROTOTYPE_USER_ID } from "@/lib/config/user";
+import { getChatModel, getLlmClient } from "@/lib/llm/client";
 
 export const revalidate = 0;
 export const fetchCache = 'force-no-store';
 
-const client = new OpenAI({
-    baseURL: "https://openrouter.ai/api/v1",
-    apiKey: process.env.OPENROUTER_API_KEY,
-    defaultHeaders: {
-        "HTTP-Referer": "https://trainer-project.vercel.app",
-        "X-Title": "TrAIner",
-    }
-});
-
-const PROTOTYPE_USER_ID = "tester-user-123";
 const DAYS_OF_WEEK = ["Domenica", "Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato"];
 const REPORT_KEYWORDS = /\b(report|recap|riepilogo|andamento|analisi|analizza|confronta|confronto|com[eè] andata|giornata)\b/i;
-const CHAT_MODEL = "nvidia/nemotron-nano-12b-v2-vl:free";
 
 type ChatRole = "user" | "assistant" | "system";
 
@@ -355,6 +345,8 @@ export async function POST(req: Request) {
     try {
         const body = await req.json() as { messages?: unknown };
         const cleanMessages = sanitizeMessages(body.messages);
+        const client = getLlmClient();
+        const chatModel = getChatModel();
 
         if (cleanMessages.length === 0) {
             return Response.json({ content: "Scrivimi pure una domanda e ti rispondo subito." });
@@ -382,7 +374,7 @@ export async function POST(req: Request) {
         const systemMessage = buildSystemMessage(reportRequested, profileContextStr, calculatedReportContext);
 
         const response = await client.chat.completions.create({
-            model: CHAT_MODEL,
+            model: chatModel,
             messages: [systemMessage, ...cleanMessages],
             stream: false,
             temperature: 0.3,
@@ -394,6 +386,6 @@ export async function POST(req: Request) {
 
     } catch (error) {
         console.error("AI API Error:", error);
-        return new Response(JSON.stringify({ error: "Errore di connessione al modello AI OpenRouter." }), { status: 500, headers: { "Content-Type": "application/json" } });
+        return new Response(JSON.stringify({ error: "Errore di connessione al modello AI Ollama." }), { status: 500, headers: { "Content-Type": "application/json" } });
     }
 }

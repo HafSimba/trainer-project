@@ -1,20 +1,10 @@
-﻿import { OpenAI } from 'openai';
-import clientPromise from '@/lib/mongodb';
+﻿import clientPromise from '@/lib/mongodb';
 import { NextResponse } from 'next/server';
+import { PROTOTYPE_USER_ID } from '@/lib/config/user';
+import { getGenerationModels, getLlmClient } from '@/lib/llm/client';
 import { UserProfile } from '@/lib/types/database';
 
 export const revalidate = 0;
-
-const client = new OpenAI({
-    baseURL: 'https://openrouter.ai/api/v1',
-    apiKey: process.env.OPENROUTER_API_KEY,
-    defaultHeaders: {
-        'HTTP-Referer': 'https://trainer-project.vercel.app',
-        'X-Title': 'TrAIner',
-    }
-});
-
-const PROTOTYPE_USER_ID = 'tester-user-123';
 
 const ALLOWED_GENDERS = ['Uomo', 'Donna', 'Altro'] as const;
 const ALLOWED_LEVELS = ['Principiante', 'Intermedio', 'Esperto'] as const;
@@ -26,11 +16,6 @@ const ALLOWED_ATTITUDE_STRESS = ['Basso', 'Medio', 'Alto'] as const;
 const ALLOWED_ATTITUDE_INTENSITY = ['Progressivo', 'Bilanciato', 'Spinto'] as const;
 const ALLOWED_ACTIVITY_LEVELS = ['sedentario', 'leggero', 'moderato', 'attivo', 'molto_attivo'] as const;
 const WEEK_DAYS = ['Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato', 'Domenica'] as const;
-const GENERATION_MODELS = [
-    'google/gemini-2.5-flash',
-    'nvidia/nemotron-nano-12b-v2-vl:free',
-] as const;
-
 type AllowedGender = typeof ALLOWED_GENDERS[number];
 
 type CanonicalOnboardingInput = {
@@ -473,9 +458,11 @@ function mergeFoodRestrictionsIntoDietRules(
 }
 
 async function requestPlanPart(prompt: string, label: string): Promise<PlanData> {
+    const client = getLlmClient();
+    const generationModels = getGenerationModels();
     let lastError: unknown = null;
 
-    for (const model of GENERATION_MODELS) {
+    for (const model of generationModels) {
         for (let attempt = 1; attempt <= 2; attempt += 1) {
             try {
                 const response = await client.chat.completions.create({

@@ -8,6 +8,7 @@ import {
     DecodeHintType,
     NotFoundException,
 } from '@zxing/library';
+import { parseJsonSafe } from '@/lib/utils';
 import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Loader2 } from 'lucide-react';
@@ -69,16 +70,6 @@ function getErrorMessage(error: unknown): string {
     }
 
     return 'Errore durante il recupero del prodotto';
-}
-
-function parseJsonSafe<T>(text: string): T | null {
-    if (!text) return null;
-
-    try {
-        return JSON.parse(text) as T;
-    } catch {
-        return null;
-    }
 }
 
 function normalizeDetectedBarcode(rawValue: string): string {
