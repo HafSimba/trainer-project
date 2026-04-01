@@ -385,12 +385,12 @@ export function BarcodeScanner({
     }, [scanning, loading, captureAndScan]);
 
     return (
-        <Card className="mx-auto w-full max-w-sm overflow-hidden border border-border/75 bg-card shadow-none">
+        <Card className="mx-auto w-full overflow-hidden border border-border/75 bg-card shadow-none">
             <CardHeader className="pb-2">
                 <CardTitle className="text-center text-base">Scanner Alimenti</CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col items-center gap-3">
-                <div className="relative flex w-full aspect-[4/3] items-center justify-center overflow-hidden rounded-lg border border-border/70 bg-black">
+                <div className="relative flex h-[clamp(11rem,42svh,18rem)] w-full items-center justify-center overflow-hidden rounded-lg border border-border/70 bg-black">
                     {scanning ? (
                         <Webcam
                             audio={false}

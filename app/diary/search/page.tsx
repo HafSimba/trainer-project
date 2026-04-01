@@ -8,8 +8,9 @@ import { BarcodeScanner } from '@/components/BarcodeScanner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { PROTOTYPE_USER_ID } from '@/lib/config/user';
-import { getTodayDate, levenshteinDistance, normalizeText, parseJsonSafe } from '@/lib/utils';
+import { cn, getTodayDate, levenshteinDistance, normalizeText, parseJsonSafe } from '@/lib/utils';
 import type { MealType } from '@/lib/types/database';
 
 const METRIC_UNIT_KEY = 'metric_100';
@@ -252,10 +253,6 @@ function DiaryFoodSearchContent() {
                         uniqueProducts.set(key, product);
                     }
                 });
-
-                if (uniqueProducts.size >= 24) {
-                    break;
-                }
             }
 
             const ranked = Array.from(uniqueProducts.values())
@@ -263,8 +260,7 @@ function DiaryFoodSearchContent() {
                     const aScore = scoreProduct(a.product_name || '', trimmedQuery);
                     const bScore = scoreProduct(b.product_name || '', trimmedQuery);
                     return bScore - aScore;
-                })
-                .slice(0, 20);
+                });
 
             setSearchResults(ranked);
 
@@ -353,8 +349,13 @@ function DiaryFoodSearchContent() {
         }
     }, [mealType, router, selectedFoods]);
 
+    const selectedListClassName = cn(
+        'space-y-2',
+        selectedFoods.length > 2 && 'max-h-[min(34svh,20rem)] overflow-y-auto pr-1 overscroll-contain'
+    );
+
     return (
-        <main className="flex flex-1 flex-col gap-4 overflow-y-auto px-4 py-6 pb-28">
+        <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 py-6 pb-28">
             <section className="motion-enter rounded-2xl bg-gradient-to-br from-primary via-primary to-emerald-700 px-4 py-5 text-primary-foreground shadow-[0_12px_28px_-18px_rgba(27,100,67,0.65)]">
                 <div className="flex items-center gap-2">
                     <Button variant="outline" size="icon" aria-label="Torna al diario" className="border-white/35 bg-white/10 text-white hover:bg-white/20" onClick={() => router.push('/diary')}>
@@ -387,12 +388,12 @@ function DiaryFoodSearchContent() {
                         <Button size="icon" aria-label="Cerca alimento" onClick={() => void searchFoods()} disabled={isSearching}>
                             {isSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
                         </Button>
-                        <Button size="icon" aria-label={showScanner ? 'Chiudi scanner barcode' : 'Apri scanner barcode'} variant={showScanner ? 'default' : 'secondary'} onClick={() => setShowScanner((prev) => !prev)}>
+                        <Button size="icon" aria-label="Apri scanner barcode" variant={showScanner ? 'default' : 'secondary'} onClick={() => setShowScanner(true)}>
                             <Camera className="h-4 w-4" />
                         </Button>
                     </div>
 
-                    {showScanner && <BarcodeScanner onProductFound={addSelectedProduct} />}
+                    {showScanner && <p className="text-xs text-primary">Scanner aperto in pannello dedicato.</p>}
 
                     {error && <p className="rounded-lg border border-destructive/25 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">{error}</p>}
                     {!error && warning && <p className="rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-sm text-warning" role="status">{warning}</p>}
@@ -408,7 +409,7 @@ function DiaryFoodSearchContent() {
                         <p className="text-xs text-muted-foreground">Nessun alimento selezionato.</p>
                     ) : (
                         <>
-                            <div className="space-y-2">
+                            <div className={selectedListClassName}>
                                 {selectedFoods.map((item) => {
                                     const unitOptions = getUnitOptions(item.product);
                                     const selectedServing = getSelectedServing(item);
@@ -502,32 +503,52 @@ function DiaryFoodSearchContent() {
                 </CardContent>
             </Card>
 
-            <Card className="motion-enter motion-delay-3 border border-border/75 bg-card shadow-sm">
+            <Card className="motion-enter motion-delay-3 min-h-0 border border-border/75 bg-card shadow-sm">
                 <CardHeader className="pb-2">
-                    <CardTitle className="text-base">Risultati ricerca</CardTitle>
+                    <CardTitle className="text-base">Risultati ricerca ({searchResults.length})</CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-2">
+                <CardContent>
                     {searchResults.length === 0 ? (
                         <p className="text-xs text-muted-foreground">Esegui una ricerca o usa lo scanner per aggiungere alimenti.</p>
                     ) : (
-                        searchResults.map((item, index) => (
-                            <Card key={`${item.food_id || item.product_name || 'food'}-${index}`} className="border border-border/70 bg-surface-soft/55 shadow-none">
-                                <CardContent className="flex items-center justify-between gap-2 p-3">
-                                    <div className="min-w-0">
-                                        <p className="line-clamp-1 text-sm font-medium">{item.product_name}</p>
-                                        <p className="line-clamp-1 text-xs text-muted-foreground">{item.brands || 'Marca non disponibile'}</p>
-                                        <p className="text-[11px] text-muted-foreground">{Math.round(getProductCaloriesPer100g(item))} kcal / 100g</p>
-                                    </div>
+                        <div className="space-y-2">
+                            {searchResults.map((item, index) => (
+                                <Card key={`${item.food_id || item.product_name || 'food'}-${index}`} className="border border-border/70 bg-surface-soft/55 shadow-none">
+                                    <CardContent className="flex items-center justify-between gap-2 p-3">
+                                        <div className="min-w-0">
+                                            <p className="line-clamp-2 text-sm font-medium leading-snug">{item.product_name}</p>
+                                            <p className="line-clamp-1 text-xs text-muted-foreground">{item.brands || 'Marca non disponibile'}</p>
+                                            <p className="text-[11px] text-muted-foreground">{Math.round(getProductCaloriesPer100g(item))} kcal / 100g</p>
+                                        </div>
 
-                                    <Button size="icon" aria-label={`Aggiungi ${item.product_name || 'alimento'} alla selezione`} onClick={() => addSelectedProduct(item)}>
-                                        <Plus className="h-4 w-4" />
-                                    </Button>
-                                </CardContent>
-                            </Card>
-                        ))
+                                        <Button size="icon" aria-label={`Aggiungi ${item.product_name || 'alimento'} alla selezione`} onClick={() => addSelectedProduct(item)}>
+                                            <Plus className="h-4 w-4" />
+                                        </Button>
+                                    </CardContent>
+                                </Card>
+                            ))}
+                        </div>
                     )}
                 </CardContent>
             </Card>
+
+            <Sheet open={showScanner} onOpenChange={setShowScanner}>
+                <SheetContent
+                    side="bottom"
+                    className="left-1/2 right-auto h-[min(86svh,42rem)] w-[min(100%,40rem)] -translate-x-1/2 overflow-hidden rounded-t-3xl border border-border/80 bg-card/98 p-0"
+                >
+                    <SheetHeader className="border-b border-border/70 px-4 pb-3 pt-4">
+                        <SheetTitle>Scanner Barcode</SheetTitle>
+                        <SheetDescription>
+                            Inquadra il codice: il prodotto verra aggiunto ai selezionati senza comprimere la pagina.
+                        </SheetDescription>
+                    </SheetHeader>
+
+                    <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3">
+                        <BarcodeScanner onProductFound={addSelectedProduct} />
+                    </div>
+                </SheetContent>
+            </Sheet>
         </main>
     );
 }
