@@ -221,6 +221,11 @@ function DiaryFoodSearchContent() {
         ]);
     }, []);
 
+    const handleScannerProductFound = useCallback((product: FatSecretFoodProduct) => {
+        addSelectedProduct(product);
+        setShowScanner(false);
+    }, [addSelectedProduct]);
+
     const searchFoods = useCallback(async () => {
         const trimmedQuery = searchQuery.trim();
         if (!trimmedQuery) return;
@@ -541,7 +546,7 @@ function DiaryFoodSearchContent() {
                         </SheetHeader>
 
                         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3">
-                            <BarcodeScanner onProductFound={addSelectedProduct} />
+                            <BarcodeScanner onProductFound={handleScannerProductFound} />
                         </div>
                     </div>
                 </SheetContent>
