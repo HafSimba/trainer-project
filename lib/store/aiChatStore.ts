@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { v4 as uuidv4 } from 'uuid';
 
 export type Role = 'user' | 'assistant' | 'system';
 
@@ -16,8 +15,15 @@ interface AiChatState {
     isOpen: boolean;
     addMessage: (role: Role, content: string) => void;
     clearMessages: () => void;
-    toggleChat: () => void;
     setChatOpen: (isOpen: boolean) => void;
+}
+
+function createMessageId(): string {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+    }
+
+    return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 export const useAiChatStore = create<AiChatState>()(
@@ -31,7 +37,7 @@ export const useAiChatStore = create<AiChatState>()(
                     messages: [
                         ...state.messages,
                         {
-                            id: uuidv4(),
+                            id: createMessageId(),
                             role,
                             content,
                             timestamp: Date.now(),
@@ -40,8 +46,6 @@ export const useAiChatStore = create<AiChatState>()(
                 })),
 
             clearMessages: () => set({ messages: [] }),
-
-            toggleChat: () => set((state) => ({ isOpen: !state.isOpen })),
 
             setChatOpen: (isOpen: boolean) => set({ isOpen }),
         }),

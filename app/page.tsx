@@ -1,16 +1,16 @@
-'use client';
-
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Activity, Apple, ArrowRight, Clock, Sparkles, Utensils, Zap } from "lucide-react";
-import { useState, useEffect } from "react";
-import { Progress } from "@/components/ui/progress";
 import Link from "next/link";
+import { Activity, Apple, ArrowRight, Clock, Sparkles, Utensils, Zap } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
+import { COLLECTIONS, getCollection } from "@/lib/mongodb";
 import { PROTOTYPE_USER_ID } from "@/lib/config/user";
-import { extractApiError, readJsonResponse } from "@/lib/utils";
+import type { DailyLog, UserProfile, WorkoutDay } from "@/lib/types/database";
 
-// Mappiamo gli indici di JS ai giorni della settimana in Italiano usati dall'AI
 const DAYS_OF_WEEK = ["Domenica", "Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato"];
+const DEFAULT_TARGET_CALORIES = 2000;
+
+export const revalidate = 0;
 
 type DailySummary = {
     calories: number;
@@ -19,177 +19,113 @@ type DailySummary = {
     fats: number;
 };
 
-type DashboardWorkoutDay = {
-    day_name?: string;
-    workout_type?: string;
-    exercises?: unknown[];
+type NextMeal = {
+    name: string;
+    foods: string[];
+} | null;
+
+type DashboardData = {
+    profile: UserProfile | null;
+    dailySummary: DailySummary;
+    currentDayName: string;
+    workoutToday: WorkoutDay | null;
+    nextMeal: NextMeal;
 };
 
-type DashboardDietMeals = {
-    colazione?: string[];
-    pranzo?: string[];
-    snack?: string[];
-    cena?: string[];
-};
-
-type DashboardProfile = {
-    name?: string;
-    targets?: {
-        daily_calories?: number;
-        daily_carbs_g?: number;
-        daily_protein_g?: number;
-        daily_fats_g?: number;
-    };
-    workout_plan?: {
-        schedule?: DashboardWorkoutDay[];
-    };
-    diet_plan?: {
-        weekly_schedule?: Array<{
-            day_name?: string;
-            meals?: DashboardDietMeals;
-        }>;
-    };
-};
-
-type LogsResponse = {
-    daily_nutrition_summary?: {
-        total_calories?: number;
-        total_proteins_g?: number;
-        total_carbs_g?: number;
-        total_fats_g?: number;
-    };
-};
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return !!value && typeof value === "object";
+function safeNumber(value: unknown): number {
+    const parsed = typeof value === "number" ? value : Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function isDashboardProfile(value: unknown): value is DashboardProfile {
-    return isRecord(value) && ("workout_plan" in value || "targets" in value || "name" in value || "diet_plan" in value);
+function buildDailySummary(log: DailyLog | null): DailySummary {
+    return {
+        calories: Math.max(0, safeNumber(log?.daily_nutrition_summary?.total_calories)),
+        proteins: Math.max(0, safeNumber(log?.daily_nutrition_summary?.total_proteins_g)),
+        carbs: Math.max(0, safeNumber(log?.daily_nutrition_summary?.total_carbs_g)),
+        fats: Math.max(0, safeNumber(log?.daily_nutrition_summary?.total_fats_g)),
+    };
 }
 
-export default function Dashboard() {
-    const [loading, setLoading] = useState(true);
-    const [profile, setProfile] = useState<DashboardProfile | null>(null);
-    const [dailySummary, setDailySummary] = useState<DailySummary>({
-        calories: 0,
-        proteins: 0,
-        carbs: 0,
-        fats: 0
-    });
-
-    const [currentDayName, setCurrentDayName] = useState("");
-    const [workoutToday, setWorkoutToday] = useState<DashboardWorkoutDay | null>(null);
-    const [nextMeal, setNextMeal] = useState<{ name: string, foods: string[] } | null>(null);
-
-    useEffect(() => {
-        fetchDashboardData();
-    }, []);
-
-    const fetchDashboardData = async () => {
-        setLoading(true);
-        try {
-            const todayString = new Date().toISOString().split('T')[0];
-            const dayIndex = new Date().getDay();
-            const currentDay = DAYS_OF_WEEK[dayIndex];
-            setCurrentDayName(currentDay);
-
-            // Chiamate parallele: recupera quello che ho mangiato e l'intera scheda/dieta
-            const [logsRes, profileRes] = await Promise.all([
-                fetch('/api/logs?userId=' + PROTOTYPE_USER_ID + '&date=' + todayString),
-                fetch('/api/profile?userId=' + PROTOTYPE_USER_ID)
-            ]);
-
-            const [logsData, profileData] = await Promise.all([
-                readJsonResponse<LogsResponse>(logsRes),
-                readJsonResponse<unknown>(profileRes)
-            ]);
-
-            if (!logsRes.ok || !profileRes.ok) {
-                throw new Error(
-                    extractApiError(logsData)
-                    || extractApiError(profileData)
-                    || 'Errore nel recupero dei dati dashboard.'
-                );
-            }
-
-            // Setto le calorie consumate oggi rispetto al target
-            if (logsData?.daily_nutrition_summary) {
-                setDailySummary({
-                    calories: Math.max(0, logsData.daily_nutrition_summary.total_calories || 0),
-                    proteins: Math.max(0, logsData.daily_nutrition_summary.total_proteins_g || 0),
-                    carbs: Math.max(0, logsData.daily_nutrition_summary.total_carbs_g || 0),
-                    fats: Math.max(0, logsData.daily_nutrition_summary.total_fats_g || 0)
-                });
-            }
-
-            if (isDashboardProfile(profileData) && profileData.workout_plan) {
-                setProfile(profileData);
-
-                // 1. TROVA L'ALLENAMENTO DI OGGI
-                const workout = profileData.workout_plan.schedule?.find(
-                    (scheduleDay) => (scheduleDay.day_name || "").toLowerCase() === currentDay.toLowerCase()
-                );
-                setWorkoutToday(workout || null);
-
-                // 2. TROVA IL PROSSIMO PASTO IN BASE ALL'ORARIO E AL GIORNO ATTUALE
-                if (profileData.diet_plan?.weekly_schedule) {
-                    const todaysDiet = profileData.diet_plan.weekly_schedule.find(
-                        (dietDay) => (dietDay.day_name || "").toLowerCase() === currentDay.toLowerCase()
-                    );
-
-                    if (todaysDiet && todaysDiet.meals) {
-                        const hour = new Date().getHours();
-                        let mealName = "";
-                        let foods: string[] = [];
-
-                        if (hour < 11 && todaysDiet.meals.colazione) {
-                            mealName = "Colazione";
-                            foods = todaysDiet.meals.colazione;
-                        } else if (hour < 15 && todaysDiet.meals.pranzo) {
-                            mealName = "Pranzo";
-                            foods = todaysDiet.meals.pranzo;
-                        } else if (hour < 19 && todaysDiet.meals.snack) {
-                            mealName = "Snack / Merenda";
-                            foods = todaysDiet.meals.snack;
-                        } else if (todaysDiet.meals.cena) {
-                            mealName = "Cena";
-                            foods = todaysDiet.meals.cena;
-                        } else {
-                            mealName = "Fine Giornata";
-                            foods = ["Ottimo lavoro per oggi!"];
-                        }
-
-                        if (mealName && foods.length > 0) {
-                            setNextMeal({ name: mealName, foods });
-                        }
-                    }
-                }
-            }
-
-        } catch (error) {
-            console.error("Error fetching dashboard data:", error);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const targetCal = profile?.targets?.daily_calories || 2000;
-    const progressPercent = Math.min((dailySummary.calories / targetCal) * 100, 100);
-
-    if (loading) {
-        return (
-            <main className="flex-1 px-5 py-7 pb-28">
-                <div className="animate-pulse space-y-4">
-                    <div className="h-40 rounded-3xl bg-muted" />
-                    <div className="h-28 rounded-2xl bg-muted/80" />
-                    <div className="h-36 rounded-2xl bg-muted/80" />
-                </div>
-            </main>
-        );
+function resolveNextMeal(
+    meals: UserProfile["diet_plan"]["weekly_schedule"][number]["meals"] | undefined
+): NextMeal {
+    if (!meals) {
+        return null;
     }
 
-    // Se l'utente non ha mai generato un piano
+    const hour = new Date().getHours();
+    if (hour < 11 && Array.isArray(meals.colazione) && meals.colazione.length > 0) {
+        return { name: "Colazione", foods: meals.colazione };
+    }
+
+    if (hour < 15 && Array.isArray(meals.pranzo) && meals.pranzo.length > 0) {
+        return { name: "Pranzo", foods: meals.pranzo };
+    }
+
+    if (hour < 19 && Array.isArray(meals.snack) && meals.snack.length > 0) {
+        return { name: "Snack / Merenda", foods: meals.snack };
+    }
+
+    if (Array.isArray(meals.cena) && meals.cena.length > 0) {
+        return { name: "Cena", foods: meals.cena };
+    }
+
+    return { name: "Fine Giornata", foods: ["Ottimo lavoro per oggi!"] };
+}
+
+async function loadDashboardData(): Promise<DashboardData> {
+    const currentDayName = DAYS_OF_WEEK[new Date().getDay()];
+    const todayString = new Date().toISOString().split("T")[0];
+
+    try {
+        const [dailyLogsCollection, profilesCollection] = await Promise.all([
+            getCollection<DailyLog>(COLLECTIONS.dailyLogs),
+            getCollection<UserProfile>(COLLECTIONS.userProfiles),
+        ]);
+
+        const [log, profile] = await Promise.all([
+            dailyLogsCollection.findOne({ userId: PROTOTYPE_USER_ID, date: todayString }),
+            profilesCollection.findOne({ userId: PROTOTYPE_USER_ID }),
+        ]);
+
+        const workoutToday = profile?.workout_plan?.schedule?.find(
+            (scheduleDay) => (scheduleDay.day_name || "").toLowerCase() === currentDayName.toLowerCase()
+        ) || null;
+
+        const todaysDiet = profile?.diet_plan?.weekly_schedule?.find(
+            (dietDay) => (dietDay.day_name || "").toLowerCase() === currentDayName.toLowerCase()
+        );
+
+        return {
+            profile: profile || null,
+            dailySummary: buildDailySummary(log),
+            currentDayName,
+            workoutToday,
+            nextMeal: resolveNextMeal(todaysDiet?.meals),
+        };
+    } catch (error) {
+        console.error("Dashboard load error:", error);
+
+        return {
+            profile: null,
+            dailySummary: {
+                calories: 0,
+                proteins: 0,
+                carbs: 0,
+                fats: 0,
+            },
+            currentDayName,
+            workoutToday: null,
+            nextMeal: null,
+        };
+    }
+}
+
+export default async function Dashboard() {
+    const { profile, dailySummary, currentDayName, workoutToday, nextMeal } = await loadDashboardData();
+    const targetCal = Math.max(1, profile?.targets?.daily_calories || DEFAULT_TARGET_CALORIES);
+    const progressPercent = Math.min((dailySummary.calories / targetCal) * 100, 100);
+
     if (!profile || !profile.workout_plan) {
         return (
             <main className="flex-1 px-6 py-10 pb-28 flex flex-col items-center justify-center gap-5 text-center">
@@ -243,7 +179,7 @@ export default function Dashboard() {
                     </CardTitle>
                 </CardHeader>
                 <CardContent>
-                    <Progress value={progressPercent} className="mb-4 h-2.5 rounded-full bg-muted" />
+                    <Progress aria-label="Progressione calorie giornaliere" value={progressPercent} className="mb-4 h-2.5 rounded-full bg-muted" />
                     <div className="grid grid-cols-3 gap-2 text-center text-sm">
                         <div className="rounded-xl border border-warning/25 bg-warning/10 p-2.5">
                             <p className="font-bold text-warning">{Math.round(dailySummary.carbs)}g</p>

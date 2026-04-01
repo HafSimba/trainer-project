@@ -344,7 +344,7 @@ export default function Diary() {
                 <span className="font-semibold">Calorie Totali</span>
                 <span className="text-muted-foreground">{Math.round(summary.total_calories)} / {dailyCalorieGoal} kcal</span>
               </div>
-              <Progress value={calorieProgress} className="h-2 rounded-full bg-muted" />
+              <Progress aria-label="Progressione calorie giornaliere" value={calorieProgress} className="h-2 rounded-full bg-muted" />
             </div>
             <div className="mt-2 grid grid-cols-3 gap-1 text-center text-[10px]">
               <div className="flex flex-col"><span className="font-bold text-warning">{summary.total_carbs_g ? Math.round(summary.total_carbs_g) : 0}g</span>Carbo</div>

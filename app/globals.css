@@ -159,7 +159,6 @@
     opacity: 0;
     transform: translate3d(0, 14px, 0);
     animation: enter-up var(--motion-duration-base) var(--motion-ease-premium) forwards;
-    will-change: transform, opacity;
   }
 
   .motion-fast {
@@ -193,7 +192,6 @@
     animation: none !important;
     opacity: 1 !important;
     transform: none !important;
-    will-change: auto;
   }
 }
 
@@ -209,6 +207,15 @@
       radial-gradient(circle at 82% 14%, color-mix(in srgb, var(--info) 16%, transparent) 0%, transparent 42%),
       linear-gradient(180deg, color-mix(in srgb, var(--surface-soft) 70%, transparent) 0%, transparent 32%);
   }
+
+  @media (max-width: 640px) {
+    body {
+      background-image:
+        radial-gradient(circle at 14% 18%, color-mix(in srgb, var(--primary) 14%, transparent) 0%, transparent 36%),
+        linear-gradient(180deg, color-mix(in srgb, var(--surface-soft) 65%, transparent) 0%, transparent 28%);
+    }
+  }
+
   html {
     @apply font-sans;
   }

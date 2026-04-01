@@ -2,8 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Bot, Send, Trash2, X } from 'lucide-react';
-import ReactMarkdown, { type Components } from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import type { Components } from 'react-markdown';
 import { useAiChatStore, type ChatMessage as StoredChatMessage } from '@/lib/store/aiChatStore';
 import {
     Sheet,
@@ -72,6 +71,9 @@ type ChatApiResponse = {
     error?: string;
 };
 
+type MarkdownRendererType = typeof import('react-markdown').default;
+type RemarkGfmPlugin = typeof import('remark-gfm').default;
+
 function buildChatHistory(messages: StoredChatMessage[]): ChatApiMessage[] {
     return messages.map((message) => ({ role: message.role, content: message.content }));
 }
@@ -84,7 +86,10 @@ export function AiChatSheet() {
     const { messages, isOpen, setChatOpen, addMessage, clearMessages } = useAiChatStore();
     const [inputValue, setInputValue] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const [MarkdownRenderer, setMarkdownRenderer] = useState<MarkdownRendererType | null>(null);
+    const [remarkPlugins, setRemarkPlugins] = useState<RemarkGfmPlugin[] | null>(null);
     const messagesContainerRef = useRef<HTMLDivElement | null>(null);
+    const hasAssistantMessages = messages.some((message) => message.role === 'assistant');
 
     useEffect(() => {
         if (!isOpen) return;
@@ -92,6 +97,32 @@ export function AiChatSheet() {
         if (!container) return;
         container.scrollTop = container.scrollHeight;
     }, [messages, isLoading, isOpen]);
+
+    useEffect(() => {
+        if (!hasAssistantMessages || MarkdownRenderer) {
+            return;
+        }
+
+        let cancelled = false;
+
+        void Promise.all([
+            import('react-markdown'),
+            import('remark-gfm'),
+        ]).then(([reactMarkdownModule, remarkGfmModule]) => {
+            if (cancelled) {
+                return;
+            }
+
+            setMarkdownRenderer(() => reactMarkdownModule.default);
+            setRemarkPlugins([remarkGfmModule.default]);
+        }).catch((error: unknown) => {
+            console.error('Markdown loader error:', error);
+        });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [hasAssistantMessages, MarkdownRenderer]);
 
     const handleSend = async () => {
         if (!inputValue.trim() || isLoading) return;
@@ -141,6 +172,7 @@ export function AiChatSheet() {
                 render={
                     <Button
                         size="icon"
+                        aria-label="Apri assistente AI"
                         className="fixed bottom-20 right-4 z-50 h-12 w-12 rounded-full bg-primary shadow-lg hover:bg-primary/90"
                     />
                 }
@@ -160,10 +192,10 @@ export function AiChatSheet() {
                         TrAIner Assistant
                     </SheetTitle>
                     <div className="flex items-center gap-1">
-                        <Button variant="ghost" size="icon" onClick={clearMessages} title="Cancella chat">
+                        <Button variant="ghost" size="icon" aria-label="Cancella chat" onClick={clearMessages} title="Cancella chat">
                             <Trash2 className="h-4 w-4 text-gray-500 hover:text-red-500" />
                         </Button>
-                        <Button variant="ghost" size="icon" onClick={() => setChatOpen(false)} title="Chiudi chat">
+                        <Button variant="ghost" size="icon" aria-label="Chiudi chat" onClick={() => setChatOpen(false)} title="Chiudi chat">
                             <X className="h-4 w-4 text-gray-500" />
                         </Button>
                     </div>
@@ -189,9 +221,13 @@ export function AiChatSheet() {
                                     >
                                         {msg.role === 'assistant' ? (
                                             <div className="text-[13px] sm:text-sm leading-6">
-                                                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                                                    {msg.content}
-                                                </ReactMarkdown>
+                                                {MarkdownRenderer && remarkPlugins ? (
+                                                    <MarkdownRenderer remarkPlugins={remarkPlugins} components={markdownComponents}>
+                                                        {msg.content}
+                                                    </MarkdownRenderer>
+                                                ) : (
+                                                    <p className="text-sm whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+                                                )}
                                             </div>
                                         ) : (
                                             <p className="text-sm whitespace-pre-wrap leading-relaxed">{msg.content}</p>
@@ -226,7 +262,7 @@ export function AiChatSheet() {
                             if (e.key === 'Enter') handleSend();
                         }}
                     />
-                    <Button size="icon" className="shrink-0 rounded-full bg-primary hover:bg-primary/90" disabled={isLoading} onClick={handleSend}>
+                    <Button size="icon" aria-label="Invia messaggio" className="shrink-0 rounded-full bg-primary hover:bg-primary/90" disabled={isLoading} onClick={handleSend}>
                         <Send className="h-4 w-4 text-white" />
                     </Button>
                 </div>

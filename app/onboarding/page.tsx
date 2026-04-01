@@ -284,7 +284,7 @@ export default function Onboarding() {
                                 <span>Step {step + 1} di {INTERACTIVE_STEPS}</span>
                                 <span>{Math.round(interactiveProgress)}%</span>
                             </div>
-                            <Progress value={interactiveProgress} className="h-2 rounded-full bg-muted" />
+                            <Progress aria-label="Progressione step onboarding" value={interactiveProgress} className="h-2 rounded-full bg-muted" />
                         </div>
                     )}
 
@@ -500,7 +500,7 @@ export default function Onboarding() {
                                         <span>Completamento</span>
                                         <span>{Math.round(progress)}%</span>
                                     </div>
-                                    <Progress value={progress} className="h-2.5 rounded-full bg-muted" />
+                                    <Progress aria-label="Progressione generazione piano" value={progress} className="h-2.5 rounded-full bg-muted" />
                                 </div>
                                 <div className="flex items-center justify-center gap-2 text-sm text-primary">
                                     <Loader2 className="h-4 w-4 animate-spin" />

@@ -1,10 +1,9 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import { Suspense, useCallback, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, Camera, Loader2, Plus, Search, Sparkles, Trash2 } from 'lucide-react';
-import { v4 as uuidv4 } from 'uuid';
-import { BarcodeScanner } from '@/components/BarcodeScanner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -14,6 +13,18 @@ import { getTodayDate, levenshteinDistance, normalizeText, parseJsonSafe } from 
 import type { MealType } from '@/lib/types/database';
 
 const METRIC_UNIT_KEY = 'metric_100';
+
+const BarcodeScanner = dynamic(
+    () => import('@/components/BarcodeScanner').then((module) => module.BarcodeScanner),
+    {
+        ssr: false,
+        loading: () => (
+            <div className="rounded-xl border border-border/70 bg-card px-3 py-4 text-sm text-muted-foreground">
+                Caricamento scanner...
+            </div>
+        ),
+    }
+);
 
 const MEAL_TYPE_LABEL: Record<MealType, string> = {
     colazione: 'Colazione',
@@ -74,6 +85,14 @@ type ComputedMacros = {
     carbs_g: number;
     fats_g: number;
 };
+
+function createClientId(): string {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+    }
+
+    return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
 
 function scoreProduct(name: string, query: string): number {
     const normalizedName = normalizeText(name);
@@ -213,7 +232,7 @@ function DiaryFoodSearchContent() {
         setSelectedFoods((previous) => [
             ...previous,
             {
-                id: uuidv4(),
+                id: createClientId(),
                 product,
                 quantity: defaultServing ? 1 : 100,
                 unitKey: defaultServing ? `serving:${defaultServing.serving_id}` : METRIC_UNIT_KEY,
@@ -315,7 +334,7 @@ function DiaryFoodSearchContent() {
                 const macros = computeItemMacros(item);
 
                 return {
-                    id: uuidv4(),
+                    id: createClientId(),
                     time: mealTime,
                     meal_type: mealType,
                     name: item.product.product_name || 'Alimento',
