@@ -1,4 +1,4 @@
-﻿import clientPromise from "@/lib/mongodb";
+﻿import clientPromise, { COLLECTIONS, DATABASE_NAME } from "@/lib/mongodb";
 import { PROTOTYPE_USER_ID } from "@/lib/config/user";
 import { getChatModel, getLlmClient } from "@/lib/llm/client";
 
@@ -281,11 +281,11 @@ async function fetchUserContext(today: string): Promise<{
 }> {
     try {
         const mongoClient = await clientPromise;
-        const db = mongoClient.db("trainer_db");
+        const db = mongoClient.db(DATABASE_NAME);
 
         const [userProfile, dailyLog] = await Promise.all([
-            db.collection<UserProfileSnapshot>("user_profiles").findOne({ userId: PROTOTYPE_USER_ID }),
-            db.collection<DailyLogSnapshot>("daily_logs").findOne({ userId: PROTOTYPE_USER_ID, date: today }),
+            db.collection<UserProfileSnapshot>(COLLECTIONS.userProfiles).findOne({ userId: PROTOTYPE_USER_ID }),
+            db.collection<DailyLogSnapshot>(COLLECTIONS.dailyLogs).findOne({ userId: PROTOTYPE_USER_ID, date: today }),
         ]);
 
         return { userProfile, dailyLog };

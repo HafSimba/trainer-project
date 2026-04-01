@@ -19,6 +19,23 @@ export function parseJsonSafe<T>(text: string): T | null {
   }
 }
 
+export function extractApiError(value: unknown): string | null {
+  if (!value || typeof value !== 'object') return null
+
+  const maybeError = (value as { error?: unknown }).error
+  if (typeof maybeError === 'string' && maybeError.trim()) return maybeError
+
+  const maybeMessage = (value as { message?: unknown }).message
+  if (typeof maybeMessage === 'string' && maybeMessage.trim()) return maybeMessage
+
+  return null
+}
+
+export async function readJsonResponse<T>(response: Response): Promise<T | null> {
+  const rawText = await response.text()
+  return parseJsonSafe<T>(rawText)
+}
+
 export function normalizeText(value: string): string {
   return value
     .toLowerCase()

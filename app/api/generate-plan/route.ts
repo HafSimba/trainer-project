@@ -1,7 +1,8 @@
-﻿import clientPromise from '@/lib/mongodb';
+﻿import clientPromise, { COLLECTIONS, DATABASE_NAME } from '@/lib/mongodb';
 import { NextResponse } from 'next/server';
 import { PROTOTYPE_USER_ID } from '@/lib/config/user';
 import { getGenerationModels, getLlmClient } from '@/lib/llm/client';
+import { LEGACY_PROFILE_UNSET, sanitizeLegacyProfileFields } from '@/lib/profile-legacy';
 import { UserProfile } from '@/lib/types/database';
 
 export const revalidate = 0;
@@ -711,37 +712,20 @@ function buildSafePlanData(
 
 async function saveUserProfile(canonicalInput: CanonicalOnboardingInput, safePlanData: SafePlanData) {
     const mongoClient = await clientPromise;
-    const db = mongoClient.db('trainer_db');
-    const userProfiles = db.collection<UserProfile>('user_profiles');
+    const db = mongoClient.db(DATABASE_NAME);
+    const userProfiles = db.collection<UserProfile>(COLLECTIONS.userProfiles);
 
-    await userProfiles.updateMany(
-        {
-            $or: [
-                { etaGenere: { $exists: true } },
-                { 'onboarding_input.etaGenere': { $exists: true } },
-            ],
-        },
-        {
-            $unset: {
-                etaGenere: '',
-                'onboarding_input.etaGenere': '',
-            },
-        }
-    );
-
-    const userProfile = {
+    const userProfile = sanitizeLegacyProfileFields({
         userId: PROTOTYPE_USER_ID,
         name: canonicalInput.name || 'Utente',
         ...safePlanData,
-    };
+    });
 
     return userProfiles.findOneAndUpdate(
         { userId: PROTOTYPE_USER_ID },
         {
             $set: userProfile,
-            $unset: {
-                etaGenere: '',
-            },
+            $unset: LEGACY_PROFILE_UNSET,
         },
         { upsert: true, returnDocument: 'after' }
     );

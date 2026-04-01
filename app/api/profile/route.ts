@@ -1,5 +1,6 @@
 ﻿import { NextResponse } from 'next/server';
-import clientPromise from '@/lib/mongodb';
+import { COLLECTIONS, getCollection } from '@/lib/mongodb';
+import { LEGACY_PROFILE_UNSET, sanitizeLegacyProfileFields } from '@/lib/profile-legacy';
 import { UserProfile } from '@/lib/types/database';
 
 type ProfileRequestBody = {
@@ -8,9 +9,7 @@ type ProfileRequestBody = {
 };
 
 async function getUserProfilesCollection() {
-    const client = await clientPromise;
-    const db = client.db('trainer_db');
-    return db.collection<UserProfile>('user_profiles');
+    return getCollection<UserProfile>(COLLECTIONS.userProfiles);
 }
 
 export async function GET(req: Request) {
@@ -26,7 +25,11 @@ export async function GET(req: Request) {
 
         const profile = await collection.findOne({ userId });
 
-        return NextResponse.json(profile || { message: "Nessun profilo trovato." });
+        if (!profile) {
+            return NextResponse.json({ error: 'Nessun profilo trovato.' }, { status: 200 });
+        }
+
+        return NextResponse.json(profile);
     } catch (error: unknown) {
         console.error("Errore GET Profile:", error);
         return NextResponse.json({ error: 'Errore interno del server' }, { status: 500 });
@@ -43,11 +46,13 @@ export async function POST(req: Request) {
         }
 
         const collection = await getUserProfilesCollection();
+        const sanitizedProfileData = sanitizeLegacyProfileFields(profileData);
 
         const updateResult = await collection.findOneAndUpdate(
             { userId },
             {
-                $set: { ...profileData, userId }
+                $set: { ...sanitizedProfileData, userId },
+                $unset: LEGACY_PROFILE_UNSET,
             },
             { upsert: true, returnDocument: 'after' }
         );

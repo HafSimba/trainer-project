@@ -1,17 +1,72 @@
-import clientPromise from '@/lib/mongodb';
 import { UserProfile } from '@/lib/types/database';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { User, Flame, Dumbbell } from 'lucide-react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { PROTOTYPE_USER_ID } from '@/lib/config/user';
+import { headers } from 'next/headers';
+import { extractApiError, readJsonResponse } from '@/lib/utils';
 
 export const revalidate = 0;
 
+type ProfileApiResponse = UserProfile | { profile?: UserProfile; error?: string; message?: string };
+
+function isUserProfile(value: unknown): value is UserProfile {
+    return !!value
+        && typeof value === 'object'
+        && ('name' in value || 'targets' in value || 'workout_plan' in value || 'diet_plan' in value);
+}
+
+async function resolveApiBaseUrl() {
+    const headersList = await headers();
+    const host = headersList.get('x-forwarded-host') || headersList.get('host');
+    const proto = headersList.get('x-forwarded-proto') || (process.env.NODE_ENV === 'development' ? 'http' : 'https');
+
+    if (host) {
+        return `${proto}://${host}`;
+    }
+
+    const configuredBaseUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();
+    if (configuredBaseUrl) {
+        return configuredBaseUrl;
+    }
+
+    const vercelUrl = process.env.VERCEL_URL?.trim();
+    if (vercelUrl) {
+        return `https://${vercelUrl}`;
+    }
+
+    return 'http://localhost:3000';
+}
+
+async function fetchProfileViaApi(userId: string): Promise<UserProfile | null> {
+    const baseUrl = await resolveApiBaseUrl();
+    const response = await fetch(`${baseUrl}/api/profile?userId=${encodeURIComponent(userId)}`, { cache: 'no-store' });
+    const data = await readJsonResponse<ProfileApiResponse>(response);
+
+    if (!response.ok) {
+        throw new Error(extractApiError(data) || `Errore nel recupero profilo (HTTP ${response.status})`);
+    }
+
+    if (isUserProfile(data)) {
+        return data;
+    }
+
+    if (data && typeof data === 'object' && 'profile' in data && isUserProfile((data as { profile?: unknown }).profile)) {
+        return (data as { profile: UserProfile }).profile;
+    }
+
+    return null;
+}
+
 export default async function Profile() {
-    const client = await clientPromise;
-    const db = client.db('trainer_db');
-    const userProfile = await db.collection<UserProfile>('user_profiles').findOne({ userId: PROTOTYPE_USER_ID });
+    let userProfile: UserProfile | null = null;
+
+    try {
+        userProfile = await fetchProfileViaApi(PROTOTYPE_USER_ID);
+    } catch (error) {
+        console.error('Errore caricamento profilo via API:', error);
+    }
 
     if (!userProfile) {
         return (

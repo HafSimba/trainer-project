@@ -10,7 +10,7 @@ import { Progress } from "@/components/ui/progress";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { PROTOTYPE_USER_ID } from "@/lib/config/user";
-import { getTodayDate } from "@/lib/utils";
+import { extractApiError, getTodayDate, readJsonResponse } from "@/lib/utils";
 import type { DailyLog, Meal } from "@/lib/types/database";
 
 const DEFAULT_DAILY_CALORIE_GOAL = 2400;
@@ -18,6 +18,7 @@ const DEFAULT_DAILY_CALORIE_GOAL = 2400;
 type MealType = 'colazione' | 'pranzo' | 'cena' | 'snack';
 type EditMacros = { calories: number; carbs_g: number; proteins_g: number; fats_g: number };
 type ProfileApiResponse = { targets?: { daily_calories?: number } };
+type ApiErrorResponse = { error?: string; message?: string };
 
 const DEFAULT_EDIT_MACROS: EditMacros = { calories: 0, carbs_g: 0, proteins_g: 0, fats_g: 0 };
 
@@ -48,12 +49,26 @@ function sanitizeSummary(rawSummary: DailyLog['daily_nutrition_summary'] | null 
   };
 }
 
+function isDailyLog(value: unknown): value is DailyLog {
+  return !!value && typeof value === 'object' && 'daily_nutrition_summary' in value;
+}
+
+function isProfileApiResponse(value: unknown): value is ProfileApiResponse {
+  return !!value && typeof value === 'object' && 'targets' in value;
+}
+
 async function postLogAction(payload: Record<string, unknown>) {
-  await fetch('/api/logs', {
+  const response = await fetch('/api/logs', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
+
+  const parsed = await readJsonResponse<ApiErrorResponse>(response);
+
+  if (!response.ok) {
+    throw new Error(extractApiError(parsed) || `Errore API logs (HTTP ${response.status})`);
+  }
 }
 
 export default function Diary() {
@@ -74,18 +89,30 @@ export default function Diary() {
       ]);
 
       const [data, profileData] = await Promise.all([
-        res.json() as Promise<DailyLog | { message?: string }>,
-        profileRes.json() as Promise<ProfileApiResponse>
+        readJsonResponse<DailyLog | ApiErrorResponse>(res),
+        readJsonResponse<ProfileApiResponse | ApiErrorResponse>(profileRes)
       ]);
 
-      const profileCalories = Number(profileData?.targets?.daily_calories);
+      if (!res.ok || !profileRes.ok) {
+        throw new Error(
+          extractApiError(data)
+          || extractApiError(profileData)
+          || 'Errore nel recupero dati diario.'
+        );
+      }
+
+      const profileCalories = Number(
+        isProfileApiResponse(profileData)
+          ? profileData.targets?.daily_calories
+          : undefined
+      );
       if (Number.isFinite(profileCalories) && profileCalories > 0) {
         setDailyCalorieGoal(Math.round(profileCalories));
       } else {
         setDailyCalorieGoal(DEFAULT_DAILY_CALORIE_GOAL);
       }
 
-      if ('daily_nutrition_summary' in data) {
+      if (isDailyLog(data)) {
         setLog(data);
         setWaterGlasses(Math.floor((data.daily_nutrition_summary.water_intake_ml || 0) / 250));
       } else {
@@ -161,7 +188,7 @@ export default function Diary() {
         meal: updatedMeal,
         old_meal: editingMeal
       });
-      fetchTodayData();
+      await fetchTodayData();
     } catch (e) {
       console.error(e);
       setIsLoading(false);
@@ -178,7 +205,7 @@ export default function Diary() {
         action: 'delete_meal',
         meal: mealToDelete
       });
-      fetchTodayData();
+      await fetchTodayData();
     } catch (e) {
       console.error(e);
       setIsLoading(false);

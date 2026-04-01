@@ -7,6 +7,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Loader2, ArrowRight, ArrowLeft, Sparkles } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { extractApiError, readJsonResponse } from '@/lib/utils';
 
 const LEVEL_OPTIONS = ['Principiante', 'Intermedio', 'Esperto'];
 const GOAL_OPTIONS = ['Dimagrimento', 'Definizione', 'Mantenimento', 'Ipertrofia'];
@@ -36,6 +37,12 @@ type OnboardingFormData = {
     equipaggiamentoIndex: number;
     allergieScelta: AllergyChoice;
     allergieNote: string;
+};
+
+type GeneratePlanApiResponse = {
+    success?: boolean;
+    error?: string;
+    message?: string;
 };
 
 const INITIAL_FORM_DATA: OnboardingFormData = {
@@ -242,12 +249,14 @@ export default function Onboarding() {
                 body: JSON.stringify(payload)
             });
 
+            const data = await readJsonResponse<GeneratePlanApiResponse>(res);
+
             if (res.ok) {
                 setProgress(100);
                 await new Promise((resolve) => setTimeout(resolve, 700));
                 router.push('/');
             } else {
-                throw new Error('Errore durante la generazione del piano.');
+                throw new Error(extractApiError(data) || 'Errore durante la generazione del piano.');
             }
         } catch (error) {
             console.error(error);

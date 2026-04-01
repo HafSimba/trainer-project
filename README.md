@@ -79,6 +79,12 @@ Notes:
 - If deployment is on Vercel, check FatSecret IP allowlist requirements for OAuth2 token requests.
 - For OAuth1 errors (`Invalid consumer key`, `Invalid signature`), verify `FAT_SECRET_CONSUMER_KEY` / `FAT_SECRET_CONSUMER_SECRET` and whitelist IP.
 
+## Technical Flow and Deploy Checklist
+
+Reference document for the current API data flow, no-regression checks, and deploy verification steps:
+
+- `docs/refactor-baseline-checklist.md`
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

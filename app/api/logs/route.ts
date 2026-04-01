@@ -1,5 +1,5 @@
 ﻿import { NextResponse } from 'next/server';
-import clientPromise from '@/lib/mongodb';
+import { COLLECTIONS, getCollection } from '@/lib/mongodb';
 import { DailyLog } from '@/lib/types/database';
 
 type LogAction = 'add_meal' | 'add_meals' | 'delete_meal' | 'edit_meal' | 'update_water';
@@ -13,23 +13,164 @@ type LogRequestBody = {
     water_ml?: number;
 };
 
-function clampToZero(value: number): number {
-    return Math.max(0, value);
+type MealLog = DailyLog['meals_log'];
+
+type AppendMealsParams = {
+    collection: Awaited<ReturnType<typeof getDailyLogsCollection>>;
+    userId: string;
+    date: string;
+    mealsToAppend: MealLog;
+};
+
+type AtomicMealsUpdateParams = {
+    collection: Awaited<ReturnType<typeof getDailyLogsCollection>>;
+    userId: string;
+    date: string;
+    mealsExpression: Record<string, unknown>;
+    clampTotals: boolean;
+};
+
+function safeNumber(value: unknown): number {
+    const parsed = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function recalculateTotals(meals: DailyLog['meals_log']) {
+function calculateMealsDelta(meals: MealLog) {
+    return meals.reduce(
+        (acc, item) => {
+            acc.total_calories += safeNumber(item.calories);
+            acc.total_proteins_g += safeNumber(item.proteins_g);
+            acc.total_carbs_g += safeNumber(item.carbs_g);
+            acc.total_fats_g += safeNumber(item.fats_g);
+            return acc;
+        },
+        {
+            total_calories: 0,
+            total_proteins_g: 0,
+            total_carbs_g: 0,
+            total_fats_g: 0,
+        }
+    );
+}
+
+function buildSumMealsFieldExpression(field: 'calories' | 'proteins_g' | 'carbs_g' | 'fats_g') {
     return {
-        total_calories: meals.reduce((sum, m) => sum + (m.calories || 0), 0),
-        total_proteins_g: meals.reduce((sum, m) => sum + (m.proteins_g || 0), 0),
-        total_carbs_g: meals.reduce((sum, m) => sum + (m.carbs_g || 0), 0),
-        total_fats_g: meals.reduce((sum, m) => sum + (m.fats_g || 0), 0),
+        $sum: {
+            $map: {
+                input: { $ifNull: ['$meals_log', []] },
+                as: 'meal',
+                in: { $ifNull: [`$$meal.${field}`, 0] },
+            },
+        },
+    };
+}
+
+function totalsFromCurrentMealsSet(clampTotals: boolean) {
+    const valueExpression = (field: 'calories' | 'proteins_g' | 'carbs_g' | 'fats_g') => {
+        const sumExpression = buildSumMealsFieldExpression(field);
+        return clampTotals ? { $max: [0, sumExpression] } : sumExpression;
+    };
+
+    return {
+        "daily_nutrition_summary.total_calories": valueExpression('calories'),
+        "daily_nutrition_summary.total_proteins_g": valueExpression('proteins_g'),
+        "daily_nutrition_summary.total_carbs_g": valueExpression('carbs_g'),
+        "daily_nutrition_summary.total_fats_g": valueExpression('fats_g'),
+    };
+}
+
+function mealActionsSetOnInsert(userId: string, date: string) {
+    return {
+        userId,
+        date,
+        metrics: {},
+        training_log: [],
+        meals_log: [],
+        "daily_nutrition_summary.total_calories": 0,
+        "daily_nutrition_summary.total_proteins_g": 0,
+        "daily_nutrition_summary.total_carbs_g": 0,
+        "daily_nutrition_summary.total_fats_g": 0,
+        "daily_nutrition_summary.water_intake_ml": 0,
+    };
+}
+
+function waterActionSetOnInsert(userId: string, date: string) {
+    return {
+        userId,
+        date,
+        metrics: {},
+        training_log: [],
+        meals_log: [],
+        "daily_nutrition_summary.total_calories": 0,
+        "daily_nutrition_summary.total_proteins_g": 0,
+        "daily_nutrition_summary.total_carbs_g": 0,
+        "daily_nutrition_summary.total_fats_g": 0,
     };
 }
 
 async function getDailyLogsCollection() {
-    const client = await clientPromise;
-    const db = client.db('trainer_db');
-    return db.collection<DailyLog>('daily_logs');
+    return getCollection<DailyLog>(COLLECTIONS.dailyLogs);
+}
+
+function successLogResponse(updateResult: unknown) {
+    return NextResponse.json({ success: true, log: updateResult });
+}
+
+async function updateMealsAndTotalsAtomically({
+    collection,
+    userId,
+    date,
+    mealsExpression,
+    clampTotals,
+}: AtomicMealsUpdateParams) {
+    const updatePipeline = [
+        {
+            $set: {
+                meals_log: mealsExpression,
+            },
+        },
+        {
+            $set: {
+                ...totalsFromCurrentMealsSet(clampTotals),
+            },
+        },
+    ] as Array<Record<string, unknown>>;
+
+    const updateResult = await collection.findOneAndUpdate(
+        { userId, date },
+        updatePipeline,
+        { returnDocument: 'after' }
+    );
+
+    return successLogResponse(updateResult);
+}
+
+async function appendMealsAndIncrementTotals({
+    collection,
+    userId,
+    date,
+    mealsToAppend,
+}: AppendMealsParams) {
+    const delta = calculateMealsDelta(mealsToAppend);
+
+    const updateResult = await collection.findOneAndUpdate(
+        { userId, date },
+        {
+            $setOnInsert: mealActionsSetOnInsert(userId, date),
+            $push: {
+                meals_log: { $each: mealsToAppend },
+            },
+            $inc: {
+                "daily_nutrition_summary.total_calories": delta.total_calories,
+                "daily_nutrition_summary.total_proteins_g": delta.total_proteins_g,
+                "daily_nutrition_summary.total_carbs_g": delta.total_carbs_g,
+                "daily_nutrition_summary.total_fats_g": delta.total_fats_g,
+            },
+        },
+        { upsert: true, returnDocument: 'after' }
+    );
+
+    return successLogResponse(updateResult);
 }
 
 function missingParamsError() {
@@ -47,130 +188,80 @@ export async function POST(req: Request) {
 
         const collection = await getDailyLogsCollection();
 
-        if (action === 'add_meal' && meal) {
-            const doc = await collection.findOne({ userId, date });
-            const currentMeals = doc?.meals_log || [];
-            const updatedMeals = [...currentMeals, meal];
-            const totals = recalculateTotals(updatedMeals);
-
-            const updateResult = await collection.findOneAndUpdate(
-                { userId, date },
-                {
-                    $setOnInsert: {
-                        userId,
-                        date,
-                        metrics: {},
-                        training_log: [],
-                        "daily_nutrition_summary.water_intake_ml": 0
+        switch (action) {
+            case 'add_meal': {
+                if (!meal) break;
+                return appendMealsAndIncrementTotals({
+                    collection,
+                    userId,
+                    date,
+                    mealsToAppend: [meal],
+                });
+            }
+            case 'add_meals': {
+                if (!Array.isArray(meals) || meals.length === 0) break;
+                return appendMealsAndIncrementTotals({
+                    collection,
+                    userId,
+                    date,
+                    mealsToAppend: meals,
+                });
+            }
+            case 'delete_meal': {
+                if (!meal) break;
+                return updateMealsAndTotalsAtomically({
+                    collection,
+                    userId,
+                    date,
+                    mealsExpression: {
+                        $filter: {
+                            input: { $ifNull: ['$meals_log', []] },
+                            as: 'meal',
+                            cond: { $ne: ['$$meal.id', meal.id] },
+                        },
                     },
-                    $set: {
-                        meals_log: updatedMeals,
-                        "daily_nutrition_summary.total_calories": totals.total_calories,
-                        "daily_nutrition_summary.total_proteins_g": totals.total_proteins_g,
-                        "daily_nutrition_summary.total_carbs_g": totals.total_carbs_g,
-                        "daily_nutrition_summary.total_fats_g": totals.total_fats_g,
-                    }
-                },
-                { upsert: true, returnDocument: 'after' }
-            );
-            return NextResponse.json({ success: true, log: updateResult });
-        }
-
-        if (action === 'add_meals' && Array.isArray(meals) && meals.length > 0) {
-            const doc = await collection.findOne({ userId, date });
-            const currentMeals = doc?.meals_log || [];
-            const updatedMeals = [...currentMeals, ...meals];
-            const totals = recalculateTotals(updatedMeals);
-
-            const updateResult = await collection.findOneAndUpdate(
-                { userId, date },
-                {
-                    $setOnInsert: {
-                        userId,
-                        date,
-                        metrics: {},
-                        training_log: [],
-                        "daily_nutrition_summary.water_intake_ml": 0
+                    clampTotals: true,
+                });
+            }
+            case 'edit_meal': {
+                if (!meal) break;
+                return updateMealsAndTotalsAtomically({
+                    collection,
+                    userId,
+                    date,
+                    mealsExpression: {
+                        $map: {
+                            input: { $ifNull: ['$meals_log', []] },
+                            as: 'meal',
+                            in: {
+                                $cond: [
+                                    { $eq: ['$$meal.id', meal.id] },
+                                    meal,
+                                    '$$meal',
+                                ],
+                            },
+                        },
                     },
-                    $set: {
-                        meals_log: updatedMeals,
-                        "daily_nutrition_summary.total_calories": totals.total_calories,
-                        "daily_nutrition_summary.total_proteins_g": totals.total_proteins_g,
-                        "daily_nutrition_summary.total_carbs_g": totals.total_carbs_g,
-                        "daily_nutrition_summary.total_fats_g": totals.total_fats_g,
-                    }
-                },
-                { upsert: true, returnDocument: 'after' }
-            );
-            return NextResponse.json({ success: true, log: updateResult });
-        }
-
-        if (action === 'delete_meal' && meal) {
-            const doc = await collection.findOne({ userId, date });
-            const currentMeals = doc?.meals_log || [];
-            const updatedMeals = currentMeals.filter((m) => m.id !== meal.id);
-            const totals = recalculateTotals(updatedMeals);
-
-            const updateResult = await collection.findOneAndUpdate(
-                { userId, date },
-                {
-                    $set: {
-                        meals_log: updatedMeals,
-                        "daily_nutrition_summary.total_calories": clampToZero(totals.total_calories),
-                        "daily_nutrition_summary.total_proteins_g": clampToZero(totals.total_proteins_g),
-                        "daily_nutrition_summary.total_carbs_g": clampToZero(totals.total_carbs_g),
-                        "daily_nutrition_summary.total_fats_g": clampToZero(totals.total_fats_g),
-                    }
-                },
-                { returnDocument: 'after' }
-            );
-            return NextResponse.json({ success: true, log: updateResult });
-        }
-
-        if (action === 'edit_meal' && meal) {
-            const doc = await collection.findOne({ userId, date });
-            const currentMeals = doc?.meals_log || [];
-            const updatedMeals = currentMeals.map((m) => m.id === meal.id ? meal : m);
-            const totals = recalculateTotals(updatedMeals);
-
-            const updateResult = await collection.findOneAndUpdate(
-                { userId, date },
-                {
-                    $set: {
-                        meals_log: updatedMeals,
-                        "daily_nutrition_summary.total_calories": clampToZero(totals.total_calories),
-                        "daily_nutrition_summary.total_proteins_g": clampToZero(totals.total_proteins_g),
-                        "daily_nutrition_summary.total_carbs_g": clampToZero(totals.total_carbs_g),
-                        "daily_nutrition_summary.total_fats_g": clampToZero(totals.total_fats_g),
-                    }
-                },
-                { returnDocument: 'after' }
-            );
-            return NextResponse.json({ success: true, log: updateResult });
-        }
-
-        if (action === 'update_water' && water_ml !== undefined) {
-            const updateResult = await collection.findOneAndUpdate(
-                { userId, date },
-                {
-                    $setOnInsert: {
-                        userId,
-                        date,
-                        metrics: {},
-                        training_log: [],
-                        meals_log: [],
-                        "daily_nutrition_summary.total_calories": 0,
-                        "daily_nutrition_summary.total_proteins_g": 0,
-                        "daily_nutrition_summary.total_carbs_g": 0,
-                        "daily_nutrition_summary.total_fats_g": 0,
+                    clampTotals: true,
+                });
+            }
+            case 'update_water': {
+                if (water_ml === undefined) break;
+                const updateResult = await collection.findOneAndUpdate(
+                    { userId, date },
+                    {
+                        $setOnInsert: waterActionSetOnInsert(userId, date),
+                        $set: {
+                            "daily_nutrition_summary.water_intake_ml": water_ml,
+                        },
                     },
-                    $set: {
-                        "daily_nutrition_summary.water_intake_ml": water_ml
-                    }
-                },
-                { upsert: true, returnDocument: 'after' }
-            );
-            return NextResponse.json({ success: true, log: updateResult });
+                    { upsert: true, returnDocument: 'after' }
+                );
+
+                return successLogResponse(updateResult);
+            }
+            default:
+                break;
         }
 
         return NextResponse.json({ error: 'Azione non valida o dati mancanti' }, { status: 400 });

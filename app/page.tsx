@@ -7,6 +7,7 @@ import { Progress } from "@/components/ui/progress";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { PROTOTYPE_USER_ID } from "@/lib/config/user";
+import { extractApiError, readJsonResponse } from "@/lib/utils";
 
 // Mappiamo gli indici di JS ai giorni della settimana in Italiano usati dall'AI
 const DAYS_OF_WEEK = ["Domenica", "Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato"];
@@ -99,11 +100,21 @@ export default function Dashboard() {
                 fetch('/api/profile?userId=' + PROTOTYPE_USER_ID)
             ]);
 
-            const logsData = await logsRes.json() as LogsResponse;
-            const profileData = await profileRes.json() as unknown;
+            const [logsData, profileData] = await Promise.all([
+                readJsonResponse<LogsResponse>(logsRes),
+                readJsonResponse<unknown>(profileRes)
+            ]);
+
+            if (!logsRes.ok || !profileRes.ok) {
+                throw new Error(
+                    extractApiError(logsData)
+                    || extractApiError(profileData)
+                    || 'Errore nel recupero dei dati dashboard.'
+                );
+            }
 
             // Setto le calorie consumate oggi rispetto al target
-            if (logsData && logsData.daily_nutrition_summary) {
+            if (logsData?.daily_nutrition_summary) {
                 setDailySummary({
                     calories: Math.max(0, logsData.daily_nutrition_summary.total_calories || 0),
                     proteins: Math.max(0, logsData.daily_nutrition_summary.total_proteins_g || 0),

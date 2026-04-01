@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/sheet';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { extractApiError, readJsonResponse } from '@/lib/utils';
 
 const markdownComponents: Components = {
     p: ({ children }) => <p className="mb-2 leading-relaxed last:mb-0">{children}</p>,
@@ -115,10 +116,14 @@ export function AiChatSheet() {
                 }),
             });
 
-            const data = await response.json() as ChatApiResponse;
+            const data = await readJsonResponse<ChatApiResponse>(response);
 
             if (!response.ok) {
-                throw new Error(data.error || 'Errore nella rete');
+                throw new Error(extractApiError(data) || 'Errore nella rete');
+            }
+
+            if (!data?.content) {
+                throw new Error('Risposta chat non valida');
             }
 
             addMessage('assistant', data.content);

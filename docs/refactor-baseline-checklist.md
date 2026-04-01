@@ -15,6 +15,8 @@ Ogni step deve essere piccolo, verificabile e reversibile.
 - Stato build: `npm run build` ✅
 - Script disponibili:
   - `npm run dev`
+  - `npm test`
+  - `npm run test:watch`
   - `npm run build`
   - `npm run start`
   - `npm run lint`
@@ -67,7 +69,18 @@ Ogni step deve essere piccolo, verificabile e reversibile.
 - Output: piano persistito in `user_profiles`
 
 ### `GET /api/profile?userId=...`
-- Output: profilo utente completo o message di assenza
+- Output: profilo utente completo oppure `{ error: "Nessun profilo trovato." }` con status `200`
+
+## Cleanup legacy `etaGenere` (single responsibility)
+- Single source of truth: `lib/profile-legacy.ts`
+  - `LEGACY_PROFILE_FILTER`: filtro unificato per documenti legacy
+  - `LEGACY_PROFILE_UNSET`: campi legacy da rimuovere in ogni update
+  - `sanitizeLegacyProfileFields(...)`: sanitizzazione payload prima del `$set`
+- Punto di cleanup batch: `GET /api/db-init`
+- Guard rail sui writer profilo:
+  - `POST /api/profile` applica sanitizzazione + `$unset` legacy
+  - `POST /api/generate-plan` applica sanitizzazione + `$unset` legacy
+- Obiettivo verificabile: i documenti aggiornati dai writer non possono reintrodurre `etaGenere`.
 
 ### `GET /api/logs?userId=...&date=YYYY-MM-DD`
 - Output: log giornaliero con `daily_nutrition_summary` e `meals_log`
@@ -83,7 +96,10 @@ Ogni step deve essere piccolo, verificabile e reversibile.
 ## Verifica standard per ogni step
 
 ### A. Verifica tecnica
-- Eseguire: `npm run build`
+- Eseguire in sequenza:
+  - `npm test`
+  - `npm run lint`
+  - `npm run build`
 - Se lo step tocca API: verificare assenza errori runtime lato route
 
 ### B. Smoke test manuale (rapido)
@@ -95,9 +111,24 @@ Ogni step deve essere piccolo, verificabile e reversibile.
 ## Definition of Done dello step
 Uno step è completo solo se:
 - refactor applicato ai file target
+- test verdi
 - build verde
 - smoke test coerente con i flussi interessati
 - nessuna regressione osservata sui percorsi critici
+
+## Checklist verifica deploy
+1. Variabili ambiente presenti (`MONGODB_URI`, variabili LLM, variabili FatSecret quando attive)
+2. `npm ci`
+3. `npm test`
+4. `npm run lint`
+5. `npm run build`
+6. Smoke test rapido su route critiche:
+  - `GET /api/profile?userId=<id>`
+  - `POST /api/profile`
+  - `POST /api/generate-plan`
+  - `POST /api/logs`
+7. Verifica osservabilità minima:
+  - assenza errori server su route API durante gli smoke test
 
 ## Sequenza step approvata
 1. Baseline e checklist
