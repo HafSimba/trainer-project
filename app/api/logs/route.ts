@@ -85,11 +85,6 @@ function mealActionsSetOnInsert(userId: string, date: string) {
         date,
         metrics: {},
         training_log: [],
-        meals_log: [],
-        "daily_nutrition_summary.total_calories": 0,
-        "daily_nutrition_summary.total_proteins_g": 0,
-        "daily_nutrition_summary.total_carbs_g": 0,
-        "daily_nutrition_summary.total_fats_g": 0,
         "daily_nutrition_summary.water_intake_ml": 0,
     };
 }
@@ -268,6 +263,12 @@ export async function POST(req: Request) {
 
     } catch (error: unknown) {
         console.error("Errore API Logs:", error);
+
+        const detail = error instanceof Error ? error.message : String(error);
+        if (process.env.NODE_ENV !== 'production') {
+            return NextResponse.json({ error: detail || 'Errore interno del server' }, { status: 500 });
+        }
+
         return NextResponse.json({ error: 'Errore interno del server' }, { status: 500 });
     }
 }

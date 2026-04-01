@@ -258,7 +258,7 @@ export default function Diary() {
     const sectionCals = sectionMeals.reduce((acc, m) => acc + (m.calories || 0), 0);
 
     return (
-      <Card className="mb-4 border border-border/75 bg-card shadow-sm">
+      <Card key={type} className="mb-4 border border-border/75 bg-card shadow-sm">
         <CardHeader className="pb-2 flex flex-row items-center justify-between">
           <div>
             <CardTitle className="text-base text-foreground">{title}</CardTitle>
@@ -269,8 +269,8 @@ export default function Diary() {
         <CardContent className="space-y-3">
           {sectionMeals.length > 0 ? (
             <ul className="mb-3 space-y-2">
-              {sectionMeals.map((m) => (
-                <li key={m.id} className="flex items-center justify-between rounded-xl border border-border/70 bg-surface-soft/50 px-2.5 py-2 text-sm">
+              {sectionMeals.map((m, index) => (
+                <li key={m.id || `${m.name}-${m.time}-${index}`} className="flex items-center justify-between rounded-xl border border-border/70 bg-surface-soft/50 px-2.5 py-2 text-sm">
                   <div className="flex min-w-0 flex-col">
                     <span className="truncate font-medium text-foreground" style={{ textTransform: 'capitalize' }}>{m.name}</span>
                     <span className="text-[11px] text-muted-foreground">C: {Math.round(m.carbs_g)}g | P: {Math.round(m.proteins_g)}g | G: {Math.round(m.fats_g)}g</span>
