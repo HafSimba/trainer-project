@@ -112,13 +112,13 @@ type SliderFieldProps = {
 
 function SliderField({ label, reason, options, value, onChange }: SliderFieldProps) {
     return (
-        <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
+        <div className="space-y-3 rounded-2xl border border-border/80 bg-card p-4 shadow-sm">
             <div className="flex items-start justify-between gap-3">
                 <div>
-                    <p className="font-semibold text-gray-900">{label}</p>
-                    <p className="text-xs text-gray-500 mt-1">{reason}</p>
+                    <p className="font-semibold text-foreground">{label}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{reason}</p>
                 </div>
-                <span className="text-xs font-semibold px-2 py-1 rounded-md bg-blue-50 text-blue-700 border border-blue-100">
+                <span className="rounded-md border border-primary/20 bg-primary/10 px-2 py-1 text-xs font-semibold text-primary">
                     {options[value]}
                 </span>
             </div>
@@ -130,10 +130,10 @@ function SliderField({ label, reason, options, value, onChange }: SliderFieldPro
                 step={1}
                 value={value}
                 onChange={(e) => onChange(Number(e.target.value))}
-                className="w-full accent-blue-600"
+                className="w-full accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-offset-2"
             />
 
-            <div className="flex justify-between text-[11px] text-gray-400">
+            <div className="flex justify-between text-[11px] text-muted-foreground">
                 <span>{options[0]}</span>
                 <span>{options[options.length - 1]}</span>
             </div>
@@ -269,30 +269,31 @@ export default function Onboarding() {
     };
 
     return (
-        <main className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-            <Card className="w-full max-w-lg shadow-xl border-none">
-                <CardContent className="p-6">
-                    <div className="text-center mb-6">
-                        <h1 className="text-3xl font-black text-gray-900 mb-2">TrAIner</h1>
-                        <p className="text-gray-500">Onboarding guidato per creare un piano davvero su misura.</p>
+        <main className="flex-1 overflow-y-auto px-4 py-6 pb-28">
+            <Card className="motion-enter mx-auto w-full max-w-lg border border-border/80 bg-card/95 shadow-lg backdrop-blur-sm">
+                <CardContent className="p-5 sm:p-6">
+                    <div className="mb-6 rounded-2xl bg-gradient-to-br from-primary via-primary to-emerald-700 px-4 py-5 text-primary-foreground motion-enter motion-fast motion-delay-1">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-primary-foreground/85">Profilazione smart</p>
+                        <h1 className="mt-2 text-3xl font-black">TrAIner</h1>
+                        <p className="mt-1 text-sm text-primary-foreground/90">Onboarding guidato per creare un piano realmente su misura.</p>
                     </div>
 
                     {step < 4 && (
-                        <div className="mb-6">
-                            <div className="flex items-center justify-between text-xs text-gray-500 mb-2">
+                        <div className="mb-6 motion-enter motion-fast motion-delay-2">
+                            <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
                                 <span>Step {step + 1} di {INTERACTIVE_STEPS}</span>
                                 <span>{Math.round(interactiveProgress)}%</span>
                             </div>
-                            <Progress value={interactiveProgress} className="h-2" />
+                            <Progress value={interactiveProgress} className="h-2 rounded-full bg-muted" />
                         </div>
                     )}
 
-                    <form onSubmit={handleSubmit} className="space-y-5">
+                    <form onSubmit={handleSubmit} className="space-y-5 motion-enter motion-delay-2" noValidate>
                         {step === 0 && (
-                            <section className="space-y-4">
-                                <div className="rounded-xl bg-blue-50 border border-blue-100 p-4">
-                                    <p className="text-blue-900 font-semibold">Piacere di conoscerti, io sono TrAIner.</p>
-                                    <p className="text-blue-700 text-sm mt-1">Ho il piacere di parlare con...</p>
+                            <section className="space-y-4 motion-enter motion-delay-1">
+                                <div className="rounded-xl border border-primary/20 bg-primary/10 p-4">
+                                    <p className="font-semibold text-primary">Piacere di conoscerti, io sono TrAIner.</p>
+                                    <p className="mt-1 text-sm text-primary/90">Ho il piacere di parlare con...</p>
                                 </div>
 
                                 <div>
@@ -315,7 +316,7 @@ export default function Onboarding() {
                                         value={formData.obiettivoPersonale}
                                         onChange={handleChange as unknown as React.ChangeEventHandler<HTMLTextAreaElement>}
                                         placeholder="Es: Voglio rimettermi in forma per l'estate, voglio correre una maratona tra 6 mesi..."
-                                        className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                                        className="flex min-h-[96px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                                         rows={3}
                                     />
                                 </div>
@@ -323,19 +324,19 @@ export default function Onboarding() {
                         )}
 
                         {step === 1 && (
-                            <section className="space-y-4">
-                                <h2 className="text-lg font-bold text-gray-900">Dati corporei</h2>
+                            <section className="space-y-4 motion-enter motion-delay-1">
+                                <h2 className="text-lg font-bold text-foreground">Dati corporei</h2>
 
                                 <div className="space-y-1">
                                     <label className="text-sm font-semibold block">Altezza (cm)</label>
                                     <Input type="number" min="100" max="250" name="altezza" value={formData.altezza} onChange={handleChange} placeholder="Es: 178" required />
-                                    <p className="text-xs text-gray-500">Mi serve per stimare meglio metabolismo e composizione del piano.</p>
+                                    <p className="text-xs text-muted-foreground">Mi serve per stimare meglio metabolismo e composizione del piano.</p>
                                 </div>
 
                                 <div className="space-y-1">
                                     <label className="text-sm font-semibold block">Età</label>
                                     <Input type="number" min="14" max="90" name="eta" value={formData.eta} onChange={handleChange} placeholder="Es: 30" required />
-                                    <p className="text-xs text-gray-500">L’età influisce sul recupero e sulla distribuzione dei carichi.</p>
+                                    <p className="text-xs text-muted-foreground">L’età influisce sul recupero e sulla distribuzione dei carichi.</p>
                                 </div>
 
                                 <div className="space-y-1">
@@ -346,31 +347,32 @@ export default function Onboarding() {
                                                 key={option}
                                                 type="button"
                                                 onClick={() => updateFormField('sesso', option)}
-                                                className={`h-10 rounded-lg border text-sm font-medium transition-colors ${formData.sesso === option
-                                                    ? 'bg-blue-600 text-white border-blue-600'
-                                                    : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                                                aria-pressed={formData.sesso === option}
+                                                className={`h-10 rounded-lg border text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-offset-2 ${formData.sesso === option
+                                                    ? 'border-primary bg-primary text-primary-foreground'
+                                                    : 'border-border bg-card text-foreground hover:bg-surface-soft'
                                                     }`}
                                             >
                                                 {option}
                                             </button>
                                         ))}
                                     </div>
-                                    <p className="text-xs text-gray-500">Utile per una stima più coerente del fabbisogno energetico.</p>
+                                    <p className="text-xs text-muted-foreground">Utile per una stima più coerente del fabbisogno energetico.</p>
                                 </div>
 
                                 <div className="space-y-1">
                                     <label className="text-sm font-semibold block">Peso (kg)</label>
                                     <Input type="number" min="30" max="250" name="peso" value={formData.peso} onChange={handleChange} placeholder="Es: 78" required />
-                                    <p className="text-xs text-gray-500">Il peso mi serve per calcolare calorie, macro e progressione del piano.</p>
+                                    <p className="text-xs text-muted-foreground">Il peso mi serve per calcolare calorie, macro e progressione del piano.</p>
                                 </div>
                             </section>
                         )}
 
                         {step === 2 && (
-                            <section className="space-y-4">
-                                <h2 className="text-lg font-bold text-gray-900">Sezione attitudinale</h2>
+                            <section className="space-y-4 motion-enter motion-delay-1">
+                                <h2 className="text-lg font-bold text-foreground">Sezione attitudinale</h2>
 
-                                <p className="text-sm text-gray-500">
+                                <p className="text-sm text-muted-foreground">
                                     Questo passaggio mi aiuta a calibrare progressione, volume e recupero in base al tuo comportamento reale.
                                 </p>
 
@@ -409,8 +411,8 @@ export default function Onboarding() {
                         )}
 
                         {step === 3 && (
-                            <section className="space-y-4">
-                                <h2 className="text-lg font-bold text-gray-900">Preferenze operative</h2>
+                            <section className="space-y-4 motion-enter motion-delay-1">
+                                <h2 className="text-lg font-bold text-foreground">Preferenze operative</h2>
 
                                 <SliderField
                                     label="Livello attuale"
@@ -436,19 +438,20 @@ export default function Onboarding() {
                                     onChange={(nextValue) => updateFormField('equipaggiamentoIndex', nextValue)}
                                 />
 
-                                <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
+                                <div className="space-y-3 rounded-xl border border-border/80 bg-card p-4 shadow-sm">
                                     <div>
-                                        <p className="font-semibold text-gray-900">Hai allergie o casi alimentari specifici?</p>
-                                        <p className="text-xs text-gray-500 mt-1">Esempi: celiachia, intolleranza al lattosio, allergia a frutta secca. Questo dato è usato direttamente dall’AI nel piano alimentare.</p>
+                                        <p className="font-semibold text-foreground">Hai allergie o casi alimentari specifici?</p>
+                                        <p className="mt-1 text-xs text-muted-foreground">Esempi: celiachia, intolleranza al lattosio, allergia a frutta secca. Questo dato è usato direttamente dall’AI nel piano alimentare.</p>
                                     </div>
 
                                     <div className="grid grid-cols-2 gap-2">
                                         <button
                                             type="button"
                                             onClick={() => setFormData((prev) => ({ ...prev, allergieScelta: 'nessuna', allergieNote: '' }))}
-                                            className={`h-10 rounded-lg border text-sm font-medium transition-colors ${formData.allergieScelta === 'nessuna'
-                                                ? 'bg-blue-600 text-white border-blue-600'
-                                                : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                                            aria-pressed={formData.allergieScelta === 'nessuna'}
+                                            className={`h-10 rounded-lg border text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-offset-2 ${formData.allergieScelta === 'nessuna'
+                                                ? 'border-primary bg-primary text-primary-foreground'
+                                                : 'border-border bg-card text-foreground hover:bg-surface-soft'
                                                 }`}
                                         >
                                             No
@@ -456,9 +459,10 @@ export default function Onboarding() {
                                         <button
                                             type="button"
                                             onClick={() => updateFormField('allergieScelta', 'presenti')}
-                                            className={`h-10 rounded-lg border text-sm font-medium transition-colors ${formData.allergieScelta === 'presenti'
-                                                ? 'bg-blue-600 text-white border-blue-600'
-                                                : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                                            aria-pressed={formData.allergieScelta === 'presenti'}
+                                            className={`h-10 rounded-lg border text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-offset-2 ${formData.allergieScelta === 'presenti'
+                                                ? 'border-primary bg-primary text-primary-foreground'
+                                                : 'border-border bg-card text-foreground hover:bg-surface-soft'
                                                 }`}
                                         >
                                             Sì
@@ -481,32 +485,32 @@ export default function Onboarding() {
                         )}
 
                         {step === 4 && (
-                            <section className="space-y-5 py-2">
+                            <section className="space-y-5 py-2 motion-enter motion-delay-1" aria-live="polite">
                                 <div className="flex items-center justify-center">
-                                    <div className="h-14 w-14 rounded-full bg-blue-100 flex items-center justify-center">
-                                        <Sparkles className="w-6 h-6 text-blue-600" />
+                                    <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/15">
+                                        <Sparkles className="h-6 w-6 text-primary" />
                                     </div>
                                 </div>
                                 <div className="text-center">
-                                    <p className="font-semibold text-gray-900">Preparazione del tuo piano personalizzato</p>
-                                    <p className="text-sm text-gray-500 mt-1">{loadingMessage}</p>
+                                    <p className="font-semibold text-foreground">Preparazione del tuo piano personalizzato</p>
+                                    <p className="mt-1 text-sm text-muted-foreground">{loadingMessage}</p>
                                 </div>
                                 <div className="space-y-2">
-                                    <div className="flex items-center justify-between text-xs text-gray-500">
+                                    <div className="flex items-center justify-between text-xs text-muted-foreground">
                                         <span>Completamento</span>
                                         <span>{Math.round(progress)}%</span>
                                     </div>
-                                    <Progress value={progress} className="h-2.5" />
+                                    <Progress value={progress} className="h-2.5 rounded-full bg-muted" />
                                 </div>
-                                <div className="flex items-center justify-center gap-2 text-sm text-blue-600">
-                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                <div className="flex items-center justify-center gap-2 text-sm text-primary">
+                                    <Loader2 className="h-4 w-4 animate-spin" />
                                     <span>Ti tengo aggiornato passo per passo...</span>
                                 </div>
                             </section>
                         )}
 
                         {errorMessage && (
-                            <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+                            <p className="rounded-lg border border-destructive/25 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert" aria-live="assertive">
                                 {errorMessage}
                             </p>
                         )}
@@ -520,11 +524,11 @@ export default function Onboarding() {
                                 )}
 
                                 {step < 3 ? (
-                                    <Button type="button" onClick={nextStep} className="flex-1 bg-blue-600 hover:bg-blue-700">
+                                    <Button type="button" onClick={nextStep} className="flex-1">
                                         Continua <ArrowRight className="w-4 h-4 ml-2" />
                                     </Button>
                                 ) : (
-                                    <Button type="submit" disabled={isLoading} className="flex-1 bg-blue-600 hover:bg-blue-700 h-11">
+                                    <Button type="submit" disabled={isLoading} className="h-11 flex-1">
                                         Genera il Mio Piano <ArrowRight className="w-4 h-4 ml-2" />
                                     </Button>
                                 )}

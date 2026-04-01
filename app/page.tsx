@@ -1,7 +1,7 @@
 'use client';
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Activity, Apple, Zap, Clock, Utensils } from "lucide-react";
+import { Activity, Apple, ArrowRight, Clock, Sparkles, Utensils, Zap } from "lucide-react";
 import { useState, useEffect } from "react";
 import { Progress } from "@/components/ui/progress";
 import Link from "next/link";
@@ -178,121 +178,149 @@ export default function Dashboard() {
     const progressPercent = Math.min((dailySummary.calories / targetCal) * 100, 100);
 
     if (loading) {
-        return <div className="flex-1 p-6 flex items-center justify-center h-screen"><p className="text-gray-500 animate-pulse">Caricamento cruscotto odierno...</p></div>
+        return (
+            <main className="flex-1 px-5 py-7 pb-28">
+                <div className="animate-pulse space-y-4">
+                    <div className="h-40 rounded-3xl bg-muted" />
+                    <div className="h-28 rounded-2xl bg-muted/80" />
+                    <div className="h-36 rounded-2xl bg-muted/80" />
+                </div>
+            </main>
+        );
     }
 
     // Se l'utente non ha mai generato un piano
     if (!profile || !profile.workout_plan) {
         return (
-            <main className="flex-1 p-6 flex flex-col items-center justify-center gap-6 h-screen text-center">
-                <Zap className="w-16 h-16 text-blue-300 mb-4" />
+            <main className="flex-1 px-6 py-10 pb-28 flex flex-col items-center justify-center gap-5 text-center">
+                <div className="rounded-full bg-primary/12 p-4">
+                    <Zap className="h-10 w-10 text-primary" />
+                </div>
                 <h1 className="text-2xl font-bold">Nessun Piano Attivo</h1>
-                <p className="text-gray-500 max-w-sm">Configura il tuo profilo per far generare all&apos;intelligenza artificiale la tua dieta e il tuo allenamento.</p>
+                <p className="max-w-sm text-sm text-muted-foreground">Configura il profilo per generare un piano personalizzato di allenamento e nutrizione.</p>
                 <Link href="/onboarding">
-                    <Button className="bg-blue-600 hover:bg-blue-700">Inizia Ora</Button>
+                    <Button className="h-10 px-6">Inizia ora</Button>
                 </Link>
             </main>
         );
     }
 
     return (
-        <main className="flex-1 p-6 flex flex-col gap-6 pt-10 pb-24 overflow-y-auto">
-            <header className="mb-2">
-                <h1 className="text-3xl font-black text-gray-900 capitalize">Oggi, {currentDayName}</h1>
-                <p className="text-gray-500 mt-1 flex items-center gap-2">
-                    Bentornato, {profile.name}! Ecco il recap di oggi.
-                </p>
-            </header>
+        <main className="flex-1 overflow-y-auto px-4 py-6 pb-28">
+            <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-primary via-primary to-emerald-700 px-5 py-6 text-primary-foreground shadow-[0_16px_36px_-18px_rgba(27,100,67,0.75)]">
+                <div className="absolute -right-10 -top-10 h-36 w-36 rounded-full bg-white/15 blur-2xl" />
+                <div className="absolute -left-12 -bottom-10 h-32 w-32 rounded-full bg-black/15 blur-2xl" />
 
-            {/* RISCONTRO MACRONUTRIENTI (Loggati dal diario vs Target da Profilo) */}
-            <Card className="shadow-sm border border-gray-100 bg-white">
+                <div className="relative">
+                    <p className="inline-flex items-center gap-1 rounded-full border border-white/30 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide">
+                        <Sparkles className="h-3.5 w-3.5" /> Focus del giorno
+                    </p>
+                    <h1 className="mt-3 text-3xl font-black capitalize">Oggi, {currentDayName}</h1>
+                    <p className="mt-2 text-sm leading-relaxed text-primary-foreground/90">
+                        Bentornato, {profile.name}. Hai una visione chiara di nutrizione, workout e prossimo pasto.
+                    </p>
+
+                    <div className="mt-4 grid grid-cols-2 gap-2">
+                        <Link href="/diary" className="block">
+                            <Button variant="outline" className="h-10 w-full border-white/35 bg-white/10 text-white hover:bg-white/20">
+                                Apri Diario <ArrowRight className="ml-1 h-4 w-4" />
+                            </Button>
+                        </Link>
+                        <Link href="/profile" className="block">
+                            <Button variant="outline" className="h-10 w-full border-white/35 bg-black/15 text-white hover:bg-black/25">
+                                Piano completo
+                            </Button>
+                        </Link>
+                    </div>
+                </div>
+            </section>
+
+            <Card className="mt-4 border border-border/70 bg-card/95 shadow-sm">
                 <CardHeader className="pb-2">
                     <CardTitle className="text-lg flex items-center justify-between">
-                        <span className="flex items-center gap-2"><Apple className="h-5 w-5 text-green-600" /> Nutrizione</span>
-                        <span className="text-sm font-normal text-gray-500">{Math.round(dailySummary.calories)} / {targetCal} kcal</span>
+                        <span className="flex items-center gap-2"><Apple className="h-5 w-5 text-primary" /> Nutrizione</span>
+                        <span className="text-sm font-normal text-muted-foreground">{Math.round(dailySummary.calories)} / {targetCal} kcal</span>
                     </CardTitle>
                 </CardHeader>
                 <CardContent>
-                    <Progress value={progressPercent} className="h-3 mb-4 bg-gray-100" />
+                    <Progress value={progressPercent} className="mb-4 h-2.5 rounded-full bg-muted" />
                     <div className="grid grid-cols-3 gap-2 text-center text-sm">
-                        <div className="bg-orange-50 rounded p-2 border border-orange-100">
-                            <p className="text-orange-700 font-bold">{Math.round(dailySummary.carbs)}g</p>
-                            <p className="text-orange-500 text-xs mt-1">Carbo ({profile.targets?.daily_carbs_g || 0}g)</p>
+                        <div className="rounded-xl border border-warning/25 bg-warning/10 p-2.5">
+                            <p className="font-bold text-warning">{Math.round(dailySummary.carbs)}g</p>
+                            <p className="mt-1 text-[11px] text-warning/90">Carbo ({profile.targets?.daily_carbs_g || 0}g)</p>
                         </div>
-                        <div className="bg-blue-50 rounded p-2 border border-blue-100">
-                            <p className="text-blue-700 font-bold">{Math.round(dailySummary.proteins)}g</p>
-                            <p className="text-blue-500 text-xs mt-1">Pro ({profile.targets?.daily_protein_g || 0}g)</p>
+                        <div className="rounded-xl border border-success/25 bg-success/10 p-2.5">
+                            <p className="font-bold text-success">{Math.round(dailySummary.proteins)}g</p>
+                            <p className="mt-1 text-[11px] text-success/85">Pro ({profile.targets?.daily_protein_g || 0}g)</p>
                         </div>
-                        <div className="bg-yellow-50 rounded p-2 border border-yellow-100">
-                            <p className="text-yellow-700 font-bold">{Math.round(dailySummary.fats)}g</p>
-                            <p className="text-yellow-500 text-xs mt-1">Grassi ({profile.targets?.daily_fats_g || 0}g)</p>
+                        <div className="rounded-xl border border-info/25 bg-info/10 p-2.5">
+                            <p className="font-bold text-info">{Math.round(dailySummary.fats)}g</p>
+                            <p className="mt-1 text-[11px] text-info/85">Grassi ({profile.targets?.daily_fats_g || 0}g)</p>
                         </div>
                     </div>
                 </CardContent>
             </Card>
 
-            <div className="grid gap-4">
-                {/* ALLENAMENTO QUOTIDIANO */}
-                <Card className="shadow-sm border border-gray-100 bg-gradient-to-br from-blue-50 to-indigo-50">
+            <div className="mt-4 grid gap-4">
+                <Card className="border border-border/70 bg-gradient-to-br from-surface-soft via-surface-soft to-white shadow-sm">
                     <CardHeader className="pb-2">
-                        <CardTitle className="text-lg flex items-center justify-between text-blue-800">
+                        <CardTitle className="text-lg flex items-center justify-between text-foreground">
                             <span className="flex items-center gap-2"><Activity className="h-5 w-5" /> Allenamento</span>
                         </CardTitle>
                     </CardHeader>
                     <CardContent>
                         {workoutToday ? (
                             <>
-                                <p className="text-xl font-bold text-blue-900 mb-1">{workoutToday.workout_type}</p>
-                                <p className="text-sm text-blue-700 font-medium bg-blue-100/50 p-2 rounded-lg inline-block">
+                                <p className="mb-1 text-xl font-bold text-foreground">{workoutToday.workout_type}</p>
+                                <p className="inline-block rounded-lg border border-primary/20 bg-primary/10 p-2 text-sm font-medium text-primary">
                                     {workoutToday.exercises?.length || 0} Esercizi previsti
                                 </p>
                                 <div className="mt-4 block">
                                     <Link href="/profile">
-                                        <Button size="sm" className="bg-blue-600 text-white hover:bg-blue-700 shadow-sm">Vedi Scheda</Button>
+                                        <Button size="sm" className="shadow-sm">Vedi scheda</Button>
                                     </Link>
                                 </div>
                             </>
                         ) : (
                             <div className="py-2">
-                                <p className="text-xl font-bold text-blue-900 mb-1">Giorno di Riposo</p>
-                                <p className="text-sm text-blue-700">Nessuna sessione programmata. Recupera!</p>
+                                <p className="mb-1 text-xl font-bold text-foreground">Giorno di recupero</p>
+                                <p className="text-sm text-muted-foreground">Nessuna sessione programmata. Ottimo momento per mobilita e sonno.</p>
                             </div>
                         )}
                     </CardContent>
                 </Card>
 
-                {/* DIETA: PROSSIMO PASTO */}
-                <Card className="shadow-sm border border-gray-100 bg-gradient-to-br from-green-50 to-emerald-50">
+                <Card className="border border-border/70 bg-card shadow-sm">
                     <CardHeader className="pb-2">
-                        <CardTitle className="text-lg flex items-center justify-between text-green-800">
-                            <span className="flex items-center gap-2"><Clock className="h-5 w-5" /> Prossimo Pasto</span>
+                        <CardTitle className="text-lg flex items-center justify-between text-foreground">
+                            <span className="flex items-center gap-2"><Clock className="h-5 w-5 text-primary" /> Prossimo Pasto</span>
                         </CardTitle>
                     </CardHeader>
                     <CardContent>
                         {nextMeal ? (
                             <>
-                                <p className="text-lg font-bold text-green-900 mb-2">{nextMeal.name}</p>
-                                <ul className="space-y-2 mb-4 bg-white/60 p-3 rounded-lg border border-green-100">
+                                <p className="mb-2 text-lg font-bold text-foreground">{nextMeal.name}</p>
+                                <ul className="mb-4 space-y-2 rounded-lg border border-border bg-surface-soft/60 p-3">
                                     {nextMeal.foods.map((food, idx) => (
-                                        <li key={idx} className="text-sm text-green-900 flex items-center gap-2 font-medium">
-                                            <Utensils className="w-4 h-4 text-green-600 shrink-0" />
+                                        <li key={idx} className="flex items-center gap-2 text-sm font-medium text-foreground">
+                                            <Utensils className="h-4 w-4 shrink-0 text-primary" />
                                             {food}
                                         </li>
                                     ))}
                                 </ul>
                             </>
                         ) : (
-                            <p className="text-sm text-gray-500 bg-white/60 p-3 rounded-lg">Nessun pasto in programma al momento o giornata finita.</p>
+                            <p className="rounded-lg bg-surface-soft/70 p-3 text-sm text-muted-foreground">Nessun pasto in programma al momento o giornata finita.</p>
                         )}
 
-                        <div className="flex gap-2 w-full mt-2">
+                        <div className="mt-2 flex w-full gap-2">
                             <Link href="/diary" className="flex-1">
-                                <Button size="sm" className="w-full bg-green-600 text-white hover:bg-green-700 shadow-sm">
+                                <Button size="sm" className="w-full shadow-sm">
                                     Aggiungi al Diario
                                 </Button>
                             </Link>
                             <Link href="/profile" className="flex-1">
-                                <Button size="sm" variant="outline" className="w-full border-green-200 text-green-800 hover:bg-green-100 bg-white">
+                                <Button size="sm" variant="outline" className="w-full border-border/90 bg-card hover:bg-surface-soft">
                                     Vedi Tutto
                                 </Button>
                             </Link>
@@ -300,7 +328,6 @@ export default function Dashboard() {
                     </CardContent>
                 </Card>
             </div>
-
         </main>
     );
 }

@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ArrowLeft, Camera, Loader2, Plus, Search, Trash2 } from 'lucide-react';
+import { ArrowLeft, Camera, Loader2, Plus, Search, Sparkles, Trash2 } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { BarcodeScanner } from '@/components/BarcodeScanner';
 import { Button } from '@/components/ui/button';
@@ -354,19 +354,25 @@ function DiaryFoodSearchContent() {
     }, [mealType, router, selectedFoods]);
 
     return (
-        <main className="flex-1 p-4 pt-8 pb-24 overflow-y-auto flex flex-col gap-4">
-            <div className="flex items-center gap-2">
-                <Button variant="ghost" size="icon" onClick={() => router.push('/diary')}>
-                    <ArrowLeft className="w-5 h-5" />
-                </Button>
-                <div>
-                    <h1 className="text-xl font-bold text-gray-900">Ricerca alimento</h1>
-                    <p className="text-xs text-gray-500">Aggiunta a: {MEAL_TYPE_LABEL[mealType]}</p>
+        <main className="flex flex-1 flex-col gap-4 overflow-y-auto px-4 py-6 pb-28">
+            <section className="motion-enter rounded-2xl bg-gradient-to-br from-primary via-primary to-emerald-700 px-4 py-5 text-primary-foreground shadow-[0_12px_28px_-18px_rgba(27,100,67,0.65)]">
+                <div className="flex items-center gap-2">
+                    <Button variant="outline" size="icon" aria-label="Torna al diario" className="border-white/35 bg-white/10 text-white hover:bg-white/20" onClick={() => router.push('/diary')}>
+                        <ArrowLeft className="h-5 w-5" />
+                    </Button>
+                    <div>
+                        <h1 className="text-xl font-bold">Ricerca alimento</h1>
+                        <p className="text-xs text-primary-foreground/85">Aggiunta a: {MEAL_TYPE_LABEL[mealType]}</p>
+                    </div>
                 </div>
-            </div>
 
-            <Card className="shadow-sm border-none">
-                <CardContent className="p-4 flex flex-col gap-3">
+                <p className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-white/30 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-primary-foreground/90">
+                    <Sparkles className="h-3.5 w-3.5" /> Ricerca intelligente + barcode
+                </p>
+            </section>
+
+            <Card className="motion-enter motion-delay-1 border border-border/75 bg-card shadow-sm">
+                <CardContent className="flex flex-col gap-3 p-4">
                     <div className="flex gap-2">
                         <Input
                             placeholder="Cerca alimento..."
@@ -378,32 +384,28 @@ function DiaryFoodSearchContent() {
                                 }
                             }}
                         />
-                        <Button size="icon" onClick={() => void searchFoods()} disabled={isSearching}>
-                            {isSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                        <Button size="icon" aria-label="Cerca alimento" onClick={() => void searchFoods()} disabled={isSearching}>
+                            {isSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
                         </Button>
-                        <Button size="icon" variant={showScanner ? 'default' : 'secondary'} onClick={() => setShowScanner((prev) => !prev)}>
-                            <Camera className="w-4 h-4" />
+                        <Button size="icon" aria-label={showScanner ? 'Chiudi scanner barcode' : 'Apri scanner barcode'} variant={showScanner ? 'default' : 'secondary'} onClick={() => setShowScanner((prev) => !prev)}>
+                            <Camera className="h-4 w-4" />
                         </Button>
                     </div>
 
-                    {showScanner && (
-                        <div className="bg-black rounded-lg overflow-hidden">
-                            <BarcodeScanner onProductFound={addSelectedProduct} />
-                        </div>
-                    )}
+                    {showScanner && <BarcodeScanner onProductFound={addSelectedProduct} />}
 
-                    {error && <p className="text-sm text-red-500">{error}</p>}
-                    {!error && warning && <p className="text-sm text-amber-600">{warning}</p>}
+                    {error && <p className="rounded-lg border border-destructive/25 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">{error}</p>}
+                    {!error && warning && <p className="rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-sm text-warning" role="status">{warning}</p>}
                 </CardContent>
             </Card>
 
-            <Card className="shadow-sm border-none bg-blue-50/50">
+            <Card className="motion-enter motion-delay-2 border border-border/75 bg-surface-soft/70 shadow-sm">
                 <CardHeader className="pb-2">
                     <CardTitle className="text-base">Selezionati ({selectedFoods.length})</CardTitle>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-3">
                     {selectedFoods.length === 0 ? (
-                        <p className="text-xs text-gray-500">Nessun alimento selezionato.</p>
+                        <p className="text-xs text-muted-foreground">Nessun alimento selezionato.</p>
                     ) : (
                         <>
                             <div className="space-y-2">
@@ -413,28 +415,30 @@ function DiaryFoodSearchContent() {
                                     const computedMacros = computeItemMacros(item);
 
                                     return (
-                                        <Card key={item.id} className="border border-blue-100 shadow-none">
-                                            <CardContent className="p-3 flex flex-col gap-2">
+                                        <Card key={item.id} className="border border-border/70 bg-card shadow-none">
+                                            <CardContent className="flex flex-col gap-2 p-3">
                                                 <div className="flex items-start justify-between gap-2">
                                                     <div>
-                                                        <p className="font-semibold text-sm leading-tight">{item.product.product_name || 'Alimento'}</p>
-                                                        {item.product.brands && <p className="text-xs text-gray-500">{item.product.brands}</p>}
+                                                        <p className="text-sm font-semibold leading-tight">{item.product.product_name || 'Alimento'}</p>
+                                                        {item.product.brands && <p className="text-xs text-muted-foreground">{item.product.brands}</p>}
                                                     </div>
                                                     <Button
                                                         variant="ghost"
                                                         size="icon"
                                                         className="h-7 w-7"
+                                                        aria-label={`Rimuovi ${item.product.product_name || 'alimento'} dalla selezione`}
                                                         onClick={() => setSelectedFoods((previous) => previous.filter((food) => food.id !== item.id))}
                                                     >
-                                                        <Trash2 className="w-4 h-4 text-red-500" />
+                                                        <Trash2 className="h-4 w-4 text-destructive" />
                                                     </Button>
                                                 </div>
 
                                                 <div className="grid grid-cols-2 gap-2">
                                                     <div className="flex flex-col gap-1">
-                                                        <label className="text-[11px] text-gray-500">Unità</label>
+                                                        <label className="text-[11px] text-muted-foreground" htmlFor={`unit-${item.id}`}>Unità</label>
                                                         <select
-                                                            className="h-9 rounded-md border border-gray-200 bg-white px-2 text-sm"
+                                                            id={`unit-${item.id}`}
+                                                            className="h-9 rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-offset-2"
                                                             value={item.unitKey}
                                                             onChange={(event) => {
                                                                 const nextUnitKey = event.target.value;
@@ -456,10 +460,11 @@ function DiaryFoodSearchContent() {
                                                     </div>
 
                                                     <div className="flex flex-col gap-1">
-                                                        <label className="text-[11px] text-gray-500">
+                                                        <label className="text-[11px] text-muted-foreground" htmlFor={`quantity-${item.id}`}>
                                                             {selectedServing ? 'Quantità (porzioni)' : 'Quantità (g/ml)'}
                                                         </label>
                                                         <Input
+                                                            id={`quantity-${item.id}`}
                                                             type="number"
                                                             min={0}
                                                             step={selectedServing ? '0.25' : '1'}
@@ -475,7 +480,7 @@ function DiaryFoodSearchContent() {
                                                     </div>
                                                 </div>
 
-                                                <p className="text-[11px] text-gray-500">
+                                                <p className="text-[11px] text-muted-foreground">
                                                     {Math.round(computedMacros.calories)} kcal • C {Math.round(computedMacros.carbs_g)}g • P {Math.round(computedMacros.proteins_g)}g • G {Math.round(computedMacros.fats_g)}g
                                                 </p>
                                             </CardContent>
@@ -484,12 +489,12 @@ function DiaryFoodSearchContent() {
                                 })}
                             </div>
 
-                            <div className="bg-white rounded-lg border border-blue-100 p-3 text-xs text-gray-600">
+                            <div className="rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground">
                                 Totale selezionati: {Math.round(selectedTotals.calories)} kcal • C {Math.round(selectedTotals.carbs_g)}g • P {Math.round(selectedTotals.proteins_g)}g • G {Math.round(selectedTotals.fats_g)}g
                             </div>
 
                             <Button onClick={() => void saveSelectedFoods()} disabled={isSaving || selectedFoods.length === 0}>
-                                {isSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                                {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                                 Salva nel diario
                             </Button>
                         </>
@@ -497,25 +502,25 @@ function DiaryFoodSearchContent() {
                 </CardContent>
             </Card>
 
-            <Card className="shadow-sm border-none">
+            <Card className="motion-enter motion-delay-3 border border-border/75 bg-card shadow-sm">
                 <CardHeader className="pb-2">
                     <CardTitle className="text-base">Risultati ricerca</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-2">
                     {searchResults.length === 0 ? (
-                        <p className="text-xs text-gray-500">Esegui una ricerca o usa lo scanner per aggiungere alimenti.</p>
+                        <p className="text-xs text-muted-foreground">Esegui una ricerca o usa lo scanner per aggiungere alimenti.</p>
                     ) : (
                         searchResults.map((item, index) => (
-                            <Card key={`${item.food_id || item.product_name || 'food'}-${index}`} className="border border-gray-100 shadow-none">
-                                <CardContent className="p-3 flex items-center justify-between gap-2">
+                            <Card key={`${item.food_id || item.product_name || 'food'}-${index}`} className="border border-border/70 bg-surface-soft/55 shadow-none">
+                                <CardContent className="flex items-center justify-between gap-2 p-3">
                                     <div className="min-w-0">
-                                        <p className="font-medium text-sm line-clamp-1">{item.product_name}</p>
-                                        <p className="text-xs text-gray-500 line-clamp-1">{item.brands || 'Marca non disponibile'}</p>
-                                        <p className="text-[11px] text-gray-400">{Math.round(getProductCaloriesPer100g(item))} kcal / 100g</p>
+                                        <p className="line-clamp-1 text-sm font-medium">{item.product_name}</p>
+                                        <p className="line-clamp-1 text-xs text-muted-foreground">{item.brands || 'Marca non disponibile'}</p>
+                                        <p className="text-[11px] text-muted-foreground">{Math.round(getProductCaloriesPer100g(item))} kcal / 100g</p>
                                     </div>
 
-                                    <Button size="icon" onClick={() => addSelectedProduct(item)}>
-                                        <Plus className="w-4 h-4" />
+                                    <Button size="icon" aria-label={`Aggiungi ${item.product_name || 'alimento'} alla selezione`} onClick={() => addSelectedProduct(item)}>
+                                        <Plus className="h-4 w-4" />
                                     </Button>
                                 </CardContent>
                             </Card>
@@ -531,8 +536,10 @@ export default function DiaryFoodSearchPage() {
     return (
         <Suspense
             fallback={(
-                <main className="flex-1 p-4 pt-8 pb-24 overflow-y-auto flex flex-col gap-4">
-                    <p className="text-sm text-gray-500">Caricamento ricerca alimento...</p>
+                <main className="flex flex-1 flex-col gap-4 overflow-y-auto px-4 py-6 pb-28">
+                    <div className="motion-enter rounded-xl border border-border/75 bg-card p-4">
+                        <p className="text-sm text-muted-foreground">Caricamento ricerca alimento...</p>
+                    </div>
                 </main>
             )}
         >

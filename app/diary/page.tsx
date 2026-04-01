@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { PieChart, Pie, Cell } from "recharts";
-import { Plus, Droplets, Trash2, Loader2, Pencil } from "lucide-react";
+import { Plus, Droplets, Trash2, Loader2, Pencil, CalendarDays } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -21,6 +21,12 @@ type ProfileApiResponse = { targets?: { daily_calories?: number } };
 type ApiErrorResponse = { error?: string; message?: string };
 
 const DEFAULT_EDIT_MACROS: EditMacros = { calories: 0, carbs_g: 0, proteins_g: 0, fats_g: 0 };
+const MEAL_SECTIONS: Array<{ type: MealType; title: string; helper: string }> = [
+  { type: 'colazione', title: 'Colazione', helper: 'Inizia la giornata con energia stabile.' },
+  { type: 'pranzo', title: 'Pranzo', helper: 'Pasto centrale per performance e recupero.' },
+  { type: 'cena', title: 'Cena', helper: 'Chiusura nutrizionale della giornata.' },
+  { type: 'snack', title: 'Snack', helper: 'Spuntini strategici tra i pasti principali.' },
+];
 
 function createEmptyDailyLog(): DailyLog {
   return {
@@ -147,10 +153,15 @@ export default function Diary() {
   const summary = sanitizeSummary(rawSummary);
   const calorieProgress = Math.min((summary.total_calories / dailyCalorieGoal) * 100, 100);
   const meals = log?.meals_log || [];
+  const todayLabel = new Date().toLocaleDateString('it-IT', {
+    weekday: 'long',
+    day: '2-digit',
+    month: 'long',
+  });
   const pieData = [
-    { name: 'Carboidrati', value: summary.total_carbs_g * 4, color: '#3b82f6' },
-    { name: 'Proteine', value: summary.total_proteins_g * 4, color: '#ef4444' },
-    { name: 'Grassi', value: summary.total_fats_g * 9, color: '#f59e0b' },
+    { name: 'Carboidrati', value: summary.total_carbs_g * 4, color: '#f59e0b' },
+    { name: 'Proteine', value: summary.total_proteins_g * 4, color: '#1f8a5b' },
+    { name: 'Grassi', value: summary.total_fats_g * 9, color: '#2563eb' },
   ].filter(d => d.value > 0);
 
   if (pieData.length === 0) pieData.push({ name: 'Vuoto', value: 1, color: '#e5e7eb' });
@@ -242,41 +253,44 @@ export default function Diary() {
     }
   };
 
-  const renderMealSection = (type: MealType, title: string) => {
+  const renderMealSection = (type: MealType, title: string, helper: string) => {
     const sectionMeals = meals.filter((m) => m.meal_type === type || (!m.meal_type && type === 'colazione'));
     const sectionCals = sectionMeals.reduce((acc, m) => acc + (m.calories || 0), 0);
 
     return (
-      <Card className="mb-4 shadow-sm border-none">
+      <Card className="mb-4 border border-border/75 bg-card shadow-sm">
         <CardHeader className="pb-2 flex flex-row items-center justify-between">
-          <CardTitle className="text-base text-gray-800">{title}</CardTitle>
-          <span className="text-sm font-semibold text-gray-500">{Math.round(sectionCals)} kcal</span>
+          <div>
+            <CardTitle className="text-base text-foreground">{title}</CardTitle>
+            <p className="mt-0.5 text-xs text-muted-foreground">{helper}</p>
+          </div>
+          <span className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">{Math.round(sectionCals)} kcal</span>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-3">
           {sectionMeals.length > 0 ? (
-            <ul className="space-y-2 mb-3">
+            <ul className="mb-3 space-y-2">
               {sectionMeals.map((m) => (
-                <li key={m.id} className="flex justify-between items-center text-sm border-b pb-1 last:border-0">
-                  <div className="flex flex-col">
-                    <span className="font-medium" style={{ textTransform: 'capitalize' }}>{m.name}</span>
-                    <span className="text-[10px] text-gray-400">C: {Math.round(m.carbs_g)}g | P: {Math.round(m.proteins_g)}g | G: {Math.round(m.fats_g)}g</span>
+                <li key={m.id} className="flex items-center justify-between rounded-xl border border-border/70 bg-surface-soft/50 px-2.5 py-2 text-sm">
+                  <div className="flex min-w-0 flex-col">
+                    <span className="truncate font-medium text-foreground" style={{ textTransform: 'capitalize' }}>{m.name}</span>
+                    <span className="text-[11px] text-muted-foreground">C: {Math.round(m.carbs_g)}g | P: {Math.round(m.proteins_g)}g | G: {Math.round(m.fats_g)}g</span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-gray-600 mr-2">{Math.round(m.calories)} kcal</span>
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => startEditing(m)}>
-                      <Pencil className="w-3 h-3 text-gray-500" />
+                  <div className="ml-2 flex items-center gap-1.5">
+                    <span className="mr-1 whitespace-nowrap text-[12px] font-semibold text-muted-foreground">{Math.round(m.calories)} kcal</span>
+                    <Button variant="ghost" size="icon-sm" className="h-8 w-8" aria-label={`Modifica ${m.name}`} onClick={() => startEditing(m)}>
+                      <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
                     </Button>
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleDeleteMeal(m)}>
-                      <Trash2 className="w-3 h-3 text-red-500" />
+                    <Button variant="ghost" size="icon-sm" className="h-8 w-8" aria-label={`Elimina ${m.name}`} onClick={() => handleDeleteMeal(m)}>
+                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
                     </Button>
                   </div>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="text-xs text-gray-400 mb-3">Nessun alimento inserito.</p>
+            <p className="mb-3 rounded-lg bg-surface-soft/60 p-2.5 text-xs text-muted-foreground">Nessun alimento inserito.</p>
           )}
-          <Button variant="outline" size="sm" className="w-full" onClick={() => openAddDialog(type)}>
+          <Button variant="outline" size="default" className="h-10 w-full border-primary/20 text-primary hover:bg-primary/10" onClick={() => openAddDialog(type)}>
             <Plus className="w-4 h-4 mr-2" /> Aggiungi
           </Button>
         </CardContent>
@@ -284,13 +298,32 @@ export default function Diary() {
     );
   };
 
-  return (
-    <main className="flex-1 p-4 flex flex-col gap-4 pt-8 pb-24 overflow-y-auto">
-      <h1 className="text-2xl font-bold text-gray-900">Diario Alimentare</h1>
+  if (isLoading && !log) {
+    return (
+      <main className="flex-1 px-4 py-6 pb-28">
+        <div className="animate-pulse space-y-4">
+          <div className="h-14 w-2/3 rounded-xl bg-muted" />
+          <div className="h-36 rounded-2xl bg-muted/80" />
+          <div className="h-20 rounded-2xl bg-muted/80" />
+          <div className="h-32 rounded-2xl bg-muted/80" />
+        </div>
+      </main>
+    );
+  }
 
-      <Card className="shadow-sm border-none bg-white">
-        <CardContent className="p-4 flex gap-4 items-center">
-          <div className="w-1/3 relative h-28 min-w-[96px] min-h-[96px] flex items-center justify-center">
+  return (
+    <main className="flex-1 overflow-y-auto px-4 py-6 pb-28">
+      <header className="mb-4">
+        <p className="inline-flex items-center gap-1.5 rounded-full border border-border/80 bg-surface-soft px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-primary">
+          <CalendarDays className="h-3.5 w-3.5" /> {todayLabel}
+        </p>
+        <h1 className="mt-2 text-3xl font-black text-foreground">Diario Alimentare</h1>
+        <p className="mt-1 text-sm text-muted-foreground">Monitora calorie, macro e idratazione per guidare il piano quotidiano.</p>
+      </header>
+
+      <Card className="overflow-hidden border border-border/75 bg-gradient-to-br from-card via-card to-surface-soft/80 shadow-sm">
+        <CardContent className="flex items-center gap-4 p-4">
+          <div className="relative flex h-28 min-h-[96px] w-1/3 min-w-[96px] items-center justify-center">
             {isChartMounted && (
               <PieChart width={96} height={96}>
                 <Pie data={pieData} dataKey="value" innerRadius={25} outerRadius={40} paddingAngle={2}>
@@ -300,51 +333,48 @@ export default function Diary() {
                 </Pie>
               </PieChart>
             )}
-            <div className="absolute inset-0 flex items-center justify-center flex-col">
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
               <span className="text-xs font-bold">{Math.round(summary.total_calories)}</span>
-              <span className="text-[8px] text-gray-400">kcal</span>
+              <span className="text-[8px] text-muted-foreground">kcal</span>
             </div>
           </div>
-          <div className="w-2/3 flex flex-col gap-2 justify-center">
+          <div className="flex w-2/3 flex-col justify-center gap-2">
             <div>
-              <div className="flex justify-between text-xs mb-1">
+              <div className="mb-1 flex justify-between text-xs">
                 <span className="font-semibold">Calorie Totali</span>
-                <span className="text-gray-500">{Math.round(summary.total_calories)} / {dailyCalorieGoal} kcal</span>
+                <span className="text-muted-foreground">{Math.round(summary.total_calories)} / {dailyCalorieGoal} kcal</span>
               </div>
-              <Progress value={calorieProgress} className="h-2" />
+              <Progress value={calorieProgress} className="h-2 rounded-full bg-muted" />
             </div>
-            <div className="grid grid-cols-3 gap-1 text-[10px] text-center mt-2">
-              <div className="flex flex-col"><span className="text-blue-500 font-bold">{summary.total_carbs_g ? Math.round(summary.total_carbs_g) : 0}g</span>Carbo</div>
-              <div className="flex flex-col border-l border-r"><span className="text-red-500 font-bold">{summary.total_proteins_g ? Math.round(summary.total_proteins_g) : 0}g</span>Pro</div>
-              <div className="flex flex-col"><span className="text-amber-500 font-bold">{summary.total_fats_g ? Math.round(summary.total_fats_g) : 0}g</span>Grassi</div>
+            <div className="mt-2 grid grid-cols-3 gap-1 text-center text-[10px]">
+              <div className="flex flex-col"><span className="font-bold text-warning">{summary.total_carbs_g ? Math.round(summary.total_carbs_g) : 0}g</span>Carbo</div>
+              <div className="flex flex-col border-x border-border"><span className="font-bold text-success">{summary.total_proteins_g ? Math.round(summary.total_proteins_g) : 0}g</span>Pro</div>
+              <div className="flex flex-col"><span className="font-bold text-info">{summary.total_fats_g ? Math.round(summary.total_fats_g) : 0}g</span>Grassi</div>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      <Card className="shadow-sm border-none bg-blue-50/50">
+      <Card className="mt-4 border border-primary/20 bg-primary/10 shadow-sm">
         <CardContent className="p-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="bg-blue-100 p-2 rounded-full">
-              <Droplets className="w-5 h-5 text-blue-500" />
+            <div className="rounded-full bg-primary/20 p-2">
+              <Droplets className="h-5 w-5 text-primary" />
             </div>
             <div>
-              <p className="font-bold text-gray-800">Acqua</p>
-              <p className="text-xs text-gray-500">{waterGlasses * 250} ml tot (bicchieri: {waterGlasses})</p>
+              <p className="font-bold text-foreground">Acqua</p>
+              <p className="text-xs text-muted-foreground">{waterGlasses * 250} ml tot (bicchieri: {waterGlasses})</p>
             </div>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" size="icon" className="h-8 w-8 rounded-full border-blue-200" onClick={() => void handleWaterGlassesChange(waterGlasses - 1)}>-</Button>
-            <Button variant="default" size="icon" className="h-8 w-8 rounded-full bg-blue-500 hover:bg-blue-600" onClick={() => void handleWaterGlassesChange(waterGlasses + 1)}>+</Button>
+            <Button variant="outline" size="icon" aria-label="Riduci acqua" className="h-9 w-9 rounded-full border-primary/30" onClick={() => void handleWaterGlassesChange(waterGlasses - 1)}>-</Button>
+            <Button variant="default" size="icon" aria-label="Aumenta acqua" className="h-9 w-9 rounded-full" onClick={() => void handleWaterGlassesChange(waterGlasses + 1)}>+</Button>
           </div>
         </CardContent>
       </Card>
 
-      <div className="mt-2">
-        {renderMealSection('colazione', 'Colazione')}
-        {renderMealSection('pranzo', 'Pranzo')}
-        {renderMealSection('cena', 'Cena')}
-        {renderMealSection('snack', 'Snacks')}
+      <div className="mt-4">
+        {MEAL_SECTIONS.map((section) => renderMealSection(section.type, section.title, section.helper))}
       </div>
 
       <div className="-mt-1 text-center">
@@ -352,11 +382,12 @@ export default function Diary() {
           href="https://platform.fatsecret.com/"
           target="_blank"
           rel="noopener noreferrer"
-          className="text-[11px] font-medium text-green-600 hover:underline"
+          className="text-[11px] font-medium text-primary hover:underline"
         >
           Powered by FatSecret
         </a>
       </div>
+
       <Dialog open={isEditModalOpen} onOpenChange={(open) => {
         setIsEditModalOpen(open);
         if (!open) setEditingMeal(null);
@@ -377,22 +408,22 @@ export default function Diary() {
                 </div>
                 <div className="grid grid-cols-3 gap-2">
                   <div>
-                    <label className="text-xs font-semibold mb-1 block text-blue-500">Carbo (g)</label>
+                    <label className="text-xs font-semibold mb-1 block text-warning">Carbo (g)</label>
                     <Input type="number" value={editMacros.carbs_g} onChange={(e) => updateEditMacro('carbs_g', Number(e.target.value))} />
                   </div>
                   <div>
-                    <label className="text-xs font-semibold mb-1 block text-red-500">Pro (g)</label>
+                    <label className="text-xs font-semibold mb-1 block text-success">Pro (g)</label>
                     <Input type="number" value={editMacros.proteins_g} onChange={(e) => updateEditMacro('proteins_g', Number(e.target.value))} />
                   </div>
                   <div>
-                    <label className="text-xs font-semibold mb-1 block text-amber-500">Grassi (g)</label>
+                    <label className="text-xs font-semibold mb-1 block text-info">Grassi (g)</label>
                     <Input type="number" value={editMacros.fats_g} onChange={(e) => updateEditMacro('fats_g', Number(e.target.value))} />
                   </div>
                 </div>
               </div>
               <div className="flex gap-2 mt-4">
                 <Button variant="outline" onClick={() => setIsEditModalOpen(false)} className="flex-1">Annulla</Button>
-                <Button onClick={confirmEdit} className="flex-1 bg-blue-600 hover:bg-blue-700" disabled={isLoading}>
+                <Button onClick={confirmEdit} className="flex-1" disabled={isLoading}>
                   {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Salva'}
                 </Button>
               </div>

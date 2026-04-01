@@ -20,6 +20,7 @@ const ROI_WIDTH_RATIO = 0.78;
 const ROI_HEIGHT_RATIO = 0.3;
 
 type ScanEngine = 'native' | 'zxing';
+type CameraState = 'booting' | 'ready' | 'denied' | 'error';
 
 type BarcodeDetection = {
     rawValue?: string;
@@ -103,10 +104,11 @@ export function BarcodeScanner({
     const failedBarcodeCooldownRef = useRef<Map<string, number>>(new Map());
     const requestInFlightRef = useRef<string | null>(null);
 
-    const [scanning, setScanning] = useState(false);
+    const [scanning, setScanning] = useState(true);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [scanEngine, setScanEngine] = useState<ScanEngine>('zxing');
+    const [cameraState, setCameraState] = useState<CameraState>('booting');
 
     useEffect(() => {
         const hints = new Map<DecodeHintType, unknown>([
@@ -272,8 +274,42 @@ export function BarcodeScanner({
         }
     }, [clearBarcodeErrorCooldown, onProductFound, setBarcodeErrorCooldown]);
 
+    const startScanner = useCallback(() => {
+        lastDetectedBarcodeRef.current = null;
+        failedBarcodeCooldownRef.current.clear();
+        setError(null);
+        setLoading(false);
+        setCameraState('booting');
+        setScanning(true);
+    }, []);
+
+    const stopScanner = useCallback(() => {
+        setScanning(false);
+        setLoading(false);
+        setError(null);
+    }, []);
+
+    const handleUserMedia = useCallback(() => {
+        setCameraState('ready');
+        setError(null);
+    }, []);
+
+    const handleUserMediaError = useCallback((mediaError: string | DOMException) => {
+        const errorName = typeof mediaError === 'string' ? mediaError : mediaError?.name || '';
+        const denied = /NotAllowedError|PermissionDeniedError|denied/i.test(errorName);
+
+        setCameraState(denied ? 'denied' : 'error');
+        setScanning(false);
+        setLoading(false);
+        setError(
+            denied
+                ? 'Permesso fotocamera negato. Consenti l\'accesso alla camera e premi Riprova.'
+                : 'Impossibile accedere alla fotocamera. Verifica permessi e disponibilita del dispositivo.'
+        );
+    }, []);
+
     const captureAndScan = useCallback(async () => {
-        if (!scanning || loading || decodeInProgressRef.current || !webcamRef.current?.video) {
+        if (cameraState !== 'ready' || !scanning || loading || decodeInProgressRef.current || !webcamRef.current?.video) {
             return;
         }
 
@@ -321,6 +357,7 @@ export function BarcodeScanner({
         }
     }, [
         captureRoiFrame,
+        cameraState,
         detectWithNative,
         detectWithZxing,
         fetchProductData,
@@ -348,13 +385,13 @@ export function BarcodeScanner({
     }, [scanning, loading, captureAndScan]);
 
     return (
-        <Card className="w-full max-w-sm mx-auto overflow-hidden">
-            <CardHeader>
-                <CardTitle className="text-center">Scanner Alimenti</CardTitle>
+        <Card className="mx-auto w-full max-w-sm overflow-hidden border border-border/75 bg-card shadow-none">
+            <CardHeader className="pb-2">
+                <CardTitle className="text-center text-base">Scanner Alimenti</CardTitle>
             </CardHeader>
-            <CardContent className="flex flex-col items-center gap-4">
-                <div className="relative w-full aspect-square bg-black rounded-lg overflow-hidden flex items-center justify-center">
-                    {scanning && !loading ? (
+            <CardContent className="flex flex-col items-center gap-3">
+                <div className="relative flex w-full aspect-[4/3] items-center justify-center overflow-hidden rounded-lg border border-border/70 bg-black">
+                    {scanning ? (
                         <Webcam
                             audio={false}
                             ref={webcamRef}
@@ -365,19 +402,30 @@ export function BarcodeScanner({
                                 width: { ideal: 960 },
                                 height: { ideal: 720 },
                             }}
+                            onUserMedia={handleUserMedia}
+                            onUserMediaError={handleUserMediaError}
                             className="w-full h-full object-cover"
                         />
                     ) : (
-                        <div className="text-white text-sm">
-                            {loading ? (
-                                <Loader2 className="h-8 w-8 animate-spin mx-auto text-blue-500" />
-                            ) : (
-                                "Scanner disattivato"
-                            )}
+                        <div className="px-4 text-center text-sm text-white/90">
+                            Scanner in pausa
                         </div>
                     )}
 
-                    {scanning && (
+                    {scanning && cameraState !== 'ready' && (
+                        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-black/55 px-4 text-center text-white">
+                            <Loader2 className="h-7 w-7 animate-spin" />
+                            <p className="text-xs">Attivazione fotocamera in corso...</p>
+                        </div>
+                    )}
+
+                    {loading && (
+                        <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/45">
+                            <Loader2 className="h-7 w-7 animate-spin text-white" />
+                        </div>
+                    )}
+
+                    {scanning && cameraState === 'ready' && (
                         <>
                             <div className="absolute left-1/2 top-4 -translate-x-1/2 rounded-full bg-black/65 px-3 py-1 text-[11px] text-white pointer-events-none">
                                 Allinea il barcode dentro il riquadro
@@ -389,33 +437,26 @@ export function BarcodeScanner({
                 </div>
 
                 <div className="text-center space-y-1">
-                    <p className="text-xs text-gray-500">Mantieni il telefono fermo e il codice ben illuminato.</p>
-                    <p className="text-[11px] text-gray-400">
+                    <p className="text-xs text-muted-foreground">Mantieni il telefono fermo e il codice ben illuminato.</p>
+                    <p className="text-[11px] text-muted-foreground/85">
                         Motore: {scanEngine === 'native' ? 'BarcodeDetector (rapido)' : 'ZXing (fallback)'}
                     </p>
                 </div>
 
                 {error && (
-                    <p className="text-red-500 text-sm text-center">{error}</p>
+                    <p className="text-sm text-center text-destructive">{error}</p>
                 )}
 
-                <Button
-                    variant={scanning ? "destructive" : "default"}
-                    onClick={() => {
-                        setScanning((previousValue) => {
-                            const nextValue = !previousValue;
-                            if (nextValue) {
-                                lastDetectedBarcodeRef.current = null;
-                                failedBarcodeCooldownRef.current.clear();
-                            }
-                            return nextValue;
-                        });
-                        setError(null);
-                    }}
-                    className="w-full"
-                >
-                    {scanning ? 'Ferma Scanner' : 'Avvia Scanner'}
-                </Button>
+                <div className="flex w-full gap-2">
+                    <Button variant={scanning ? 'destructive' : 'default'} onClick={scanning ? stopScanner : startScanner} className="flex-1">
+                        {scanning ? 'Ferma scanner' : 'Avvia scanner'}
+                    </Button>
+                    {cameraState !== 'ready' && (
+                        <Button variant="outline" onClick={startScanner} className="flex-1">
+                            Riprova
+                        </Button>
+                    )}
+                </div>
             </CardContent>
         </Card>
     );

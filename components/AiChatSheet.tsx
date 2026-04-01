@@ -141,7 +141,7 @@ export function AiChatSheet() {
                 render={
                     <Button
                         size="icon"
-                        className="fixed bottom-20 right-4 h-12 w-12 rounded-full shadow-lg z-50 bg-blue-600 hover:bg-blue-700"
+                        className="fixed bottom-20 right-4 z-50 h-12 w-12 rounded-full bg-primary shadow-lg hover:bg-primary/90"
                     />
                 }
             >
@@ -152,11 +152,11 @@ export function AiChatSheet() {
                 side="right"
                 hideOverlay
                 showCloseButton={false}
-                className="right-2 left-auto top-auto bottom-20 h-[72vh] w-[calc(100vw-1rem)] max-w-sm rounded-2xl border border-gray-200 p-0 shadow-2xl flex flex-col min-h-0"
+                className="right-2 left-auto top-auto bottom-20 flex h-[72vh] min-h-0 w-[calc(100vw-1rem)] max-w-sm flex-col rounded-2xl border border-border/80 bg-card/98 p-0 shadow-2xl"
             >
                 <SheetHeader className="px-4 py-3 border-b flex flex-row items-center justify-between shadow-sm">
                     <SheetTitle className="flex items-center gap-2">
-                        <Bot className="h-5 w-5 text-blue-600" />
+                        <Bot className="h-5 w-5 text-primary" />
                         TrAIner Assistant
                     </SheetTitle>
                     <div className="flex items-center gap-1">
@@ -169,7 +169,7 @@ export function AiChatSheet() {
                     </div>
                 </SheetHeader>
 
-                <div ref={messagesContainerRef} className="flex-1 min-h-0 overflow-y-auto p-4 bg-gray-50">
+                <div ref={messagesContainerRef} className="flex-1 min-h-0 overflow-y-auto bg-surface-soft/65 p-4">
                     <div className="flex flex-col gap-4 pb-4">
                         {messages.length === 0 ? (
                             <div className="text-center text-gray-500 mt-10 text-sm">
@@ -183,7 +183,7 @@ export function AiChatSheet() {
                                 >
                                     <div
                                         className={`rounded-2xl px-4 py-2 ${msg.role === 'user'
-                                            ? 'max-w-[80%] bg-blue-600 text-white rounded-br-none'
+                                            ? 'max-w-[80%] bg-primary text-primary-foreground rounded-br-none'
                                             : 'max-w-[88%] bg-white border text-gray-800 rounded-bl-none shadow-sm'
                                             }`}
                                     >
@@ -220,13 +220,13 @@ export function AiChatSheet() {
                         value={inputValue}
                         onChange={(e) => setInputValue(e.target.value)}
                         placeholder="Chiedi a TrAIner..."
-                        className="flex-1 rounded-full bg-gray-100 border-none px-4 disabled:opacity-50"
+                        className="flex-1 rounded-full border-none bg-muted/80 px-4 disabled:opacity-50"
                         disabled={isLoading}
                         onKeyDown={(e) => {
                             if (e.key === 'Enter') handleSend();
                         }}
                     />
-                    <Button size="icon" className="rounded-full bg-blue-600 hover:bg-blue-700 shrink-0" disabled={isLoading} onClick={handleSend}>
+                    <Button size="icon" className="shrink-0 rounded-full bg-primary hover:bg-primary/90" disabled={isLoading} onClick={handleSend}>
                         <Send className="h-4 w-4 text-white" />
                     </Button>
                 </div>
