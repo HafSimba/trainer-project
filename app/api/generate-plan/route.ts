@@ -2,7 +2,7 @@
 import { NextResponse } from 'next/server';
 import { PROTOTYPE_USER_ID } from '@/lib/config/user';
 import { getGenerationModels, getLlmClient } from '@/lib/llm/client';
-import { LEGACY_PROFILE_UNSET, sanitizeLegacyProfileFields } from '@/lib/profile-legacy';
+import { createConflictSafeLegacyUnset, sanitizeLegacyProfileFields } from '@/lib/profile-legacy';
 import { UserProfile } from '@/lib/types/database';
 
 export const revalidate = 0;
@@ -721,12 +721,15 @@ async function saveUserProfile(canonicalInput: CanonicalOnboardingInput, safePla
         ...safePlanData,
     });
 
+    const conflictSafeLegacyUnset = createConflictSafeLegacyUnset(userProfile);
+    const updatePayload = {
+        $set: userProfile,
+        ...(Object.keys(conflictSafeLegacyUnset).length > 0 ? { $unset: conflictSafeLegacyUnset } : {}),
+    };
+
     return userProfiles.findOneAndUpdate(
         { userId: PROTOTYPE_USER_ID },
-        {
-            $set: userProfile,
-            $unset: LEGACY_PROFILE_UNSET,
-        },
+        updatePayload,
         { upsert: true, returnDocument: 'after' }
     );
 }

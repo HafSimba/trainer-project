@@ -1,6 +1,6 @@
 ﻿import { NextResponse } from 'next/server';
 import { COLLECTIONS, getCollection } from '@/lib/mongodb';
-import { LEGACY_PROFILE_UNSET, sanitizeLegacyProfileFields } from '@/lib/profile-legacy';
+import { createConflictSafeLegacyUnset, sanitizeLegacyProfileFields } from '@/lib/profile-legacy';
 import { UserProfile } from '@/lib/types/database';
 
 type ProfileRequestBody = {
@@ -47,12 +47,14 @@ export async function POST(req: Request) {
 
         const collection = await getUserProfilesCollection();
         const sanitizedProfileData = sanitizeLegacyProfileFields(profileData);
+        const updateSetPayload = { ...sanitizedProfileData, userId };
+        const conflictSafeLegacyUnset = createConflictSafeLegacyUnset(updateSetPayload);
 
         const updateResult = await collection.findOneAndUpdate(
             { userId },
             {
-                $set: { ...sanitizedProfileData, userId },
-                $unset: LEGACY_PROFILE_UNSET,
+                $set: updateSetPayload,
+                ...(Object.keys(conflictSafeLegacyUnset).length > 0 ? { $unset: conflictSafeLegacyUnset } : {}),
             },
             { upsert: true, returnDocument: 'after' }
         );

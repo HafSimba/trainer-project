@@ -14,6 +14,24 @@ export const LEGACY_PROFILE_UNSET: NonNullable<UpdateFilter<Document>['$unset']>
     'onboarding_input.etaGenere': '',
 };
 
+function hasPathConflict(firstPath: string, secondPath: string): boolean {
+    return firstPath === secondPath
+        || firstPath.startsWith(`${secondPath}.`)
+        || secondPath.startsWith(`${firstPath}.`);
+}
+
+export function createConflictSafeLegacyUnset(
+    setPayload: GenericRecord
+): NonNullable<UpdateFilter<Document>['$unset']> {
+    const setPaths = Object.keys(setPayload);
+
+    const safeUnsetEntries = Object.entries(LEGACY_PROFILE_UNSET).filter(([unsetPath]) => {
+        return !setPaths.some((setPath) => hasPathConflict(unsetPath, setPath));
+    });
+
+    return Object.fromEntries(safeUnsetEntries);
+}
+
 export function sanitizeLegacyProfileFields<TProfile extends GenericRecord>(profile: TProfile): TProfile {
     const sanitized: GenericRecord = { ...profile };
 
