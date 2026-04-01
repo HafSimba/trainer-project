@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { PROTOTYPE_USER_ID } from '@/lib/config/user';
-import { cn, getTodayDate, levenshteinDistance, normalizeText, parseJsonSafe } from '@/lib/utils';
+import { getTodayDate, levenshteinDistance, normalizeText, parseJsonSafe } from '@/lib/utils';
 import type { MealType } from '@/lib/types/database';
 
 const METRIC_UNIT_KEY = 'metric_100';
@@ -349,13 +349,9 @@ function DiaryFoodSearchContent() {
         }
     }, [mealType, router, selectedFoods]);
 
-    const selectedListClassName = cn(
-        'space-y-2',
-        selectedFoods.length > 2 && 'max-h-[min(34svh,20rem)] overflow-y-auto pr-1 overscroll-contain'
-    );
-
     return (
-        <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 py-6 pb-28">
+        <main className="min-h-0 flex-1 overflow-y-auto px-4 py-6 pb-28">
+            <div className="space-y-4">
             <section className="motion-enter rounded-2xl bg-gradient-to-br from-primary via-primary to-emerald-700 px-4 py-5 text-primary-foreground shadow-[0_12px_28px_-18px_rgba(27,100,67,0.65)]">
                 <div className="flex items-center gap-2">
                     <Button variant="outline" size="icon" aria-label="Torna al diario" className="border-white/35 bg-white/10 text-white hover:bg-white/20" onClick={() => router.push('/diary')}>
@@ -372,7 +368,7 @@ function DiaryFoodSearchContent() {
                 </p>
             </section>
 
-            <Card className="motion-enter motion-delay-1 border border-border/75 bg-card shadow-sm">
+            <Card className="motion-enter motion-delay-1 shrink-0 border border-border/75 bg-card shadow-sm">
                 <CardContent className="flex flex-col gap-3 p-4">
                     <div className="flex gap-2">
                         <Input
@@ -393,14 +389,12 @@ function DiaryFoodSearchContent() {
                         </Button>
                     </div>
 
-                    {showScanner && <p className="text-xs text-primary">Scanner aperto in pannello dedicato.</p>}
-
                     {error && <p className="rounded-lg border border-destructive/25 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">{error}</p>}
                     {!error && warning && <p className="rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-sm text-warning" role="status">{warning}</p>}
                 </CardContent>
             </Card>
 
-            <Card className="motion-enter motion-delay-2 border border-border/75 bg-surface-soft/70 shadow-sm">
+            <Card className="motion-enter motion-delay-2 shrink-0 border border-border/75 bg-surface-soft/70 shadow-sm">
                 <CardHeader className="pb-2">
                     <CardTitle className="text-base">Selezionati ({selectedFoods.length})</CardTitle>
                 </CardHeader>
@@ -409,7 +403,7 @@ function DiaryFoodSearchContent() {
                         <p className="text-xs text-muted-foreground">Nessun alimento selezionato.</p>
                     ) : (
                         <>
-                            <div className={selectedListClassName}>
+                            <div className="space-y-2">
                                 {selectedFoods.map((item) => {
                                     const unitOptions = getUnitOptions(item.product);
                                     const selectedServing = getSelectedServing(item);
@@ -503,7 +497,7 @@ function DiaryFoodSearchContent() {
                 </CardContent>
             </Card>
 
-            <Card className="motion-enter motion-delay-3 min-h-0 border border-border/75 bg-card shadow-sm">
+            <Card className="motion-enter motion-delay-3 shrink-0 border border-border/75 bg-card shadow-sm">
                 <CardHeader className="pb-2">
                     <CardTitle className="text-base">Risultati ricerca ({searchResults.length})</CardTitle>
                 </CardHeader>
@@ -531,21 +525,24 @@ function DiaryFoodSearchContent() {
                     )}
                 </CardContent>
             </Card>
+            </div>
 
             <Sheet open={showScanner} onOpenChange={setShowScanner}>
                 <SheetContent
                     side="bottom"
-                    className="left-1/2 right-auto h-[min(86svh,42rem)] w-[min(100%,40rem)] -translate-x-1/2 overflow-hidden rounded-t-3xl border border-border/80 bg-card/98 p-0"
+                    className="h-[min(92svh,48rem)] overflow-hidden rounded-t-3xl border border-border/80 bg-card/98 p-0"
                 >
-                    <SheetHeader className="border-b border-border/70 px-4 pb-3 pt-4">
-                        <SheetTitle>Scanner Barcode</SheetTitle>
-                        <SheetDescription>
-                            Inquadra il codice: il prodotto verra aggiunto ai selezionati senza comprimere la pagina.
-                        </SheetDescription>
-                    </SheetHeader>
+                    <div className="mx-auto flex h-full w-full max-w-xl flex-col">
+                        <SheetHeader className="border-b border-border/70 px-4 pb-3 pt-4">
+                            <SheetTitle>Scanner Barcode</SheetTitle>
+                            <SheetDescription>
+                                Inquadra il codice: il prodotto verra aggiunto ai selezionati senza comprimere la pagina.
+                            </SheetDescription>
+                        </SheetHeader>
 
-                    <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3">
-                        <BarcodeScanner onProductFound={addSelectedProduct} />
+                        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3">
+                            <BarcodeScanner onProductFound={addSelectedProduct} />
+                        </div>
                     </div>
                 </SheetContent>
             </Sheet>
