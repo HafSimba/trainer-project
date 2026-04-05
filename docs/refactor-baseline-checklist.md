@@ -30,9 +30,12 @@ Ogni step deve essere piccolo, verificabile e reversibile.
 
 - Pagina: `app/onboarding/page.tsx`
 - API: `app/api/generate-plan/route.ts`
+- Flow attuale: 5 step interattivi (`Identità e fisica`, `Missione`, `Stile di vita`, `Esperienza e attrezzatura`, `Alimentazione e limiti`) + step loading.
 - Atteso:
   - validazioni step attive
   - invio payload completo
+  - mapping UI → canonico coerente tra frontend e backend (goal, livello, stress, recupero, intensità, equipaggiamento)
+  - compatibilità payload legacy e payload nuovo onboarding
   - salvataggio profilo su `user_profiles`
   - redirect dashboard al termine
 
@@ -75,6 +78,10 @@ Ogni step deve essere piccolo, verificabile e reversibile.
 ### `POST /api/generate-plan`
 
 - Input onboarding valido (dati fisici, attitudinali, restrizioni alimentari)
+- Contratto supportato:
+  - legacy: campi canonici (`obiettivoPrimario`, `livelloAttuale`, `attitudineStress`, `attitudineRecupero`, `attitudineIntensita`, `equipaggiamento`)
+  - nuovo: campi UI + metadata opzionali (`obiettivoPrimarioUI`, `livelloEsperienzaUI`, `stileStressUI`, `stileRecuperoUI`, `scalaIntensita`, `regimeAlimentare`, `frequenzaPasti`, `infortuniNote`)
+- Garanzia: validazione backend converte i valori UI in canonico, mantiene backward compatibility e persiste `onboarding_input` esteso.
 - Output: piano persistito in `user_profiles`
 
 ### `GET /api/profile?userId=...`

@@ -17,8 +17,47 @@ const ALLOWED_EQUIPMENT = ['Corpo libero', 'Attrezzatura base in casa', 'Palestr
 const ALLOWED_ATTITUDE_RECOVERY = ['Lento', 'Normale', 'Rapido'] as const;
 const ALLOWED_ATTITUDE_STRESS = ['Basso', 'Medio', 'Alto'] as const;
 const ALLOWED_ATTITUDE_INTENSITY = ['Progressivo', 'Bilanciato', 'Spinto'] as const;
+const ALLOWED_DIET_REGIMES = ['Vegano', 'Vegetariano', 'Onnivoro', 'Keto', 'Paleo'] as const;
 const ALLOWED_ACTIVITY_LEVELS = ['sedentario', 'leggero', 'moderato', 'attivo', 'molto_attivo'] as const;
 const WEEK_DAYS = ['Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato', 'Domenica'] as const;
+
+const GOAL_UI_TO_CANONICAL: Record<string, typeof ALLOWED_GOALS[number]> = {
+    Dimagrimento: 'Dimagrimento',
+    Definizione: 'Definizione',
+    'Massa Muscolare': 'Ipertrofia',
+    Performance: 'Mantenimento',
+};
+
+const STRESS_UI_TO_CANONICAL: Record<string, typeof ALLOWED_ATTITUDE_STRESS[number]> = {
+    Rilassata: 'Basso',
+    Impegnativa: 'Medio',
+    Frenetica: 'Alto',
+};
+
+const RECOVERY_UI_TO_CANONICAL: Record<string, typeof ALLOWED_ATTITUDE_RECOVERY[number]> = {
+    '<6h tormentate': 'Lento',
+    '7h discrete': 'Normale',
+    '+8h rigeneranti': 'Rapido',
+};
+
+const LEVEL_UI_TO_CANONICAL: Record<string, typeof ALLOWED_LEVELS[number]> = {
+    Mai: 'Principiante',
+    '<6 mesi': 'Principiante',
+    '1-2 anni': 'Intermedio',
+    '+3 anni': 'Esperto',
+};
+
+const EQUIPMENT_UI_TO_CANONICAL: Record<string, typeof ALLOWED_EQUIPMENT[number]> = {
+    'Casa corpo libero': 'Corpo libero',
+    'Home Gym con pesi': 'Attrezzatura base in casa',
+    'Palestra Completa': 'Palestra attrezzata',
+};
+
+const INTENSITY_SCALE_TO_CANONICAL: Record<1 | 2 | 3, typeof ALLOWED_ATTITUDE_INTENSITY[number]> = {
+    1: 'Progressivo',
+    2: 'Bilanciato',
+    3: 'Spinto',
+};
 
 const DEFAULT_LLM_MAX_TOKENS = 3000;
 const DEFAULT_LLM_MAX_TOKENS_WORKOUT = 1800;
@@ -42,24 +81,35 @@ const LLM_REQUEST_TIMEOUT_MS = parseBoundedInt(process.env.LLM_REQUEST_TIMEOUT_M
 const LLM_MAX_ATTEMPTS = parseBoundedInt(process.env.LLM_MAX_ATTEMPTS, DEFAULT_LLM_MAX_ATTEMPTS, 1, 3);
 
 type AllowedGender = typeof ALLOWED_GENDERS[number];
+type AllowedDietRegime = typeof ALLOWED_DIET_REGIMES[number];
 
 type CanonicalOnboardingInput = {
     name: string;
     specific_goal: string;
+    mission_reason: string;
     age: number;
     gender: AllowedGender;
     height_cm: number;
     weight_kg: number;
     attitude_recovery: string;
+    attitude_recovery_ui?: string;
     attitude_stress: string;
+    attitude_stress_ui?: string;
     attitude_intensity: string;
+    intensity_scale?: number;
     level: string;
+    level_ui_label?: string;
     goal: string;
+    goal_ui_label?: string;
     available_days_per_week: number;
     available_days_label: string;
     has_food_restrictions: boolean;
     food_restrictions_notes: string;
+    injury_notes?: string;
+    diet_regime?: AllowedDietRegime;
+    meal_frequency_per_day?: number;
     equipment: string;
+    equipment_ui_label?: string;
     submitted_at: string;
 };
 
@@ -175,6 +225,19 @@ function escapeRegExp(value: string): string {
 
 function isOneOf<T extends readonly string[]>(value: string, options: T): value is T[number] {
     return options.includes(value as T[number]);
+}
+
+function mapUiLabel<T extends string>(value: string, mapping: Record<string, T>): T | null {
+    if (!value) return null;
+    return mapping[value] ?? null;
+}
+
+function appendUniqueNormalized(values: string[], nextValue: string): void {
+    const normalizedNext = normalizeForMatching(nextValue);
+    const alreadyExists = values.some((value) => normalizeForMatching(value) === normalizedNext);
+    if (!alreadyExists) {
+        values.push(nextValue);
+    }
 }
 
 function toProfileGender(gender: AllowedGender): UserProfile['personal_info']['gender'] {
@@ -468,6 +531,46 @@ function resolveGoalCaloriesAdjustment(goal: CanonicalOnboardingInput['goal']): 
     return 0;
 }
 
+const DIET_REGIME_RULES: Record<AllowedDietRegime, { preferredFoods: string[]; forbiddenFoods: string[]; guidance: string }> = {
+    Vegano: {
+        preferredFoods: ['legumi', 'tofu', 'tempeh', 'quinoa', 'verdure'],
+        forbiddenFoods: ['carne', 'pesce', 'uova', 'latticini'],
+        guidance: 'Usa solo fonti vegetali complete e combina legumi + cereali per coprire il profilo amminoacidico.',
+    },
+    Vegetariano: {
+        preferredFoods: ['uova', 'latticini magri', 'legumi', 'cereali integrali', 'verdure'],
+        forbiddenFoods: ['carne', 'pesce'],
+        guidance: 'Evita carne e pesce mantenendo un apporto proteico stabile con uova, latticini e legumi.',
+    },
+    Onnivoro: {
+        preferredFoods: ['cereali integrali', 'proteine magre', 'verdure'],
+        forbiddenFoods: [],
+        guidance: 'Mantieni varieta tra fonti animali e vegetali, con prevalenza di alimenti non processati.',
+    },
+    Keto: {
+        preferredFoods: ['uova', 'pesce azzurro', 'avocado', 'frutta secca', 'olio evo'],
+        forbiddenFoods: ['pane', 'pasta', 'zuccheri aggiunti', 'dolci industriali'],
+        guidance: 'Mantieni carboidrati netti bassi e privilegia grassi di qualita con proteine moderate.',
+    },
+    Paleo: {
+        preferredFoods: ['carni magre', 'pesce', 'uova', 'verdure', 'frutta secca'],
+        forbiddenFoods: ['legumi', 'cereali raffinati', 'latticini', 'zuccheri aggiunti'],
+        guidance: 'Prediligi alimenti minimamente processati, eliminando cereali raffinati e latticini.',
+    },
+};
+
+function resolveMealTimingLabel(input: CanonicalOnboardingInput): string {
+    if (!input.meal_frequency_per_day) {
+        return '3 pasti + 1 snack';
+    }
+
+    return `${input.meal_frequency_per_day} pasti distribuiti nella giornata`;
+}
+
+function resolveDietRegimeRule(regime: AllowedDietRegime | undefined) {
+    return regime ? DIET_REGIME_RULES[regime] : DIET_REGIME_RULES.Onnivoro;
+}
+
 function computeFallbackCaloriesTarget(input: CanonicalOnboardingInput): number {
     const genderOffset = input.gender === 'Uomo'
         ? 5
@@ -518,6 +621,18 @@ function buildFallbackPlan(input: CanonicalOnboardingInput): Required<PlanData> 
         };
     });
 
+    const regimeRule = resolveDietRegimeRule(input.diet_regime);
+    const forbiddenFoods = [...regimeRule.forbiddenFoods];
+    appendUniqueNormalized(forbiddenFoods, 'ultra-processati in eccesso');
+
+    const fallbackNotes = [
+        input.has_food_restrictions
+            ? `Fallback plan: rigenera il piano per ottenere una versione AI completa. Restrizioni segnalate: ${input.food_restrictions_notes}.`
+            : 'Fallback plan: rigenera il piano per ottenere una versione AI completa.',
+        input.diet_regime ? `Regime alimentare preferito: ${input.diet_regime}. ${regimeRule.guidance}` : '',
+        input.injury_notes ? `Indicazioni infortuni/dolori: ${input.injury_notes}.` : '',
+    ].filter(Boolean).join(' | ');
+
     return {
         personal_info: {
             age: input.age,
@@ -542,12 +657,10 @@ function buildFallbackPlan(input: CanonicalOnboardingInput): Required<PlanData> 
             weekly_schedule: weeklySchedule,
         },
         diet_rules: {
-            meal_timing: '3 pasti + 1 snack',
-            preferred_foods: ['cereali integrali', 'proteine magre', 'verdure'],
-            forbidden_foods: ['ultra-processati in eccesso'],
-            custom_notes: input.has_food_restrictions
-                ? `Fallback plan: rigenera il piano per ottenere una versione AI completa. Restrizioni segnalate: ${input.food_restrictions_notes}.`
-                : 'Fallback plan: rigenera il piano per ottenere una versione AI completa.',
+            meal_timing: resolveMealTimingLabel(input),
+            preferred_foods: [...regimeRule.preferredFoods],
+            forbidden_foods: forbiddenFoods,
+            custom_notes: fallbackNotes,
         },
     };
 }
@@ -761,14 +874,28 @@ function enforceDietaryRestrictionsOnDietPlan(
 }
 
 function buildRestrictionPromptHint(input: CanonicalOnboardingInput): string {
-    if (!input.has_food_restrictions) return 'Nessuna restrizione alimentare aggiuntiva.';
+    const hints: string[] = [];
 
-    const detectedRestrictions = detectDietaryRestrictions(input.food_restrictions_notes);
-    if (detectedRestrictions.length === 0) {
-        return `Rispetta rigorosamente questa restrizione indicata dall'utente: ${input.food_restrictions_notes}.`;
+    if (!input.has_food_restrictions) {
+        hints.push('Nessuna restrizione alimentare aggiuntiva.');
+    } else {
+        const detectedRestrictions = detectDietaryRestrictions(input.food_restrictions_notes);
+        if (detectedRestrictions.length === 0) {
+            hints.push(`Rispetta rigorosamente questa restrizione indicata dall'utente: ${input.food_restrictions_notes}.`);
+        } else {
+            hints.push(detectedRestrictions.map((restriction) => restriction.promptHint).join(' '));
+        }
     }
 
-    return detectedRestrictions.map((restriction) => restriction.promptHint).join(' ');
+    if (input.diet_regime) {
+        hints.push(`Regime alimentare preferito: ${input.diet_regime}. ${resolveDietRegimeRule(input.diet_regime).guidance}`);
+    }
+
+    if (input.meal_frequency_per_day) {
+        hints.push(`Distribuisci i pasti in ${input.meal_frequency_per_day} momenti alimentari al giorno.`);
+    }
+
+    return hints.join(' ');
 }
 
 function mergeFoodRestrictionsIntoDietRules(
@@ -803,6 +930,43 @@ function mergeFoodRestrictionsIntoDietRules(
         ...rules,
         forbidden_foods: forbiddenFoods,
         custom_notes: customNotes,
+    };
+}
+
+function mergeDietRegimeIntoDietRules(
+    rules: UserProfile['diet_rules'],
+    input: CanonicalOnboardingInput
+): UserProfile['diet_rules'] {
+    if (!input.diet_regime) {
+        return input.meal_frequency_per_day
+            ? { ...rules, meal_timing: resolveMealTimingLabel(input) }
+            : rules;
+    }
+
+    const regimeRules = resolveDietRegimeRule(input.diet_regime);
+    const preferredFoods = Array.isArray(rules.preferred_foods) ? [...rules.preferred_foods] : [];
+    const forbiddenFoods = Array.isArray(rules.forbidden_foods) ? [...rules.forbidden_foods] : [];
+
+    for (const preferredFood of regimeRules.preferredFoods) {
+        appendUniqueNormalized(preferredFoods, preferredFood);
+    }
+
+    for (const forbiddenFood of regimeRules.forbiddenFoods) {
+        appendUniqueNormalized(forbiddenFoods, forbiddenFood);
+    }
+
+    const notes = [
+        normalizeString(rules.custom_notes),
+        `Regime alimentare preferito: ${input.diet_regime}.`,
+        input.meal_frequency_per_day ? `Frequenza pasti richiesta: ${input.meal_frequency_per_day} al giorno.` : '',
+    ].filter(Boolean).join(' | ');
+
+    return {
+        ...rules,
+        meal_timing: resolveMealTimingLabel(input),
+        preferred_foods: preferredFoods,
+        forbidden_foods: forbiddenFoods,
+        custom_notes: notes,
     };
 }
 
@@ -931,22 +1095,54 @@ async function requestPlanPart(prompt: string, label: string): Promise<PlanPartR
     throw new PlanPartGenerationError(message, metrics);
 }
 
-function validateAndBuildCanonicalInput(body: unknown): CanonicalValidationResult {
+export function validateAndBuildCanonicalInput(body: unknown): CanonicalValidationResult {
     const source = isRecord(body) ? body : {};
 
     const username = normalizeString(source.username);
-    const specificGoal = normalizeString(source.obiettivoPersonale);
+    const missionReason = normalizeString(source.missionePerche ?? source.missionReason);
+    const specificGoal = normalizeString(source.obiettivoPersonale) || missionReason;
     const rawGender = normalizeString(source.sesso);
     const rawLevel = normalizeString(source.livelloAttuale);
+    const rawLevelUiLabel = normalizeString(source.livelloEsperienzaUI ?? source.livelloAttualeUI ?? source.levelLabel);
     const rawGoal = normalizeString(source.obiettivoPrimario);
+    const rawGoalUiLabel = normalizeString(source.obiettivoPrimarioUI ?? source.obiettivoPrimarioLabel ?? source.goalLabel);
     const rawTime = normalizeString(source.tempoDisponibile);
     const rawAvailabilityDays = parseNumberFromUnknown(source.disponibilitaSettimanale);
     const rawEquipment = normalizeString(source.equipaggiamento);
-    const rawAttitudeRecovery = normalizeString(source.attitudineRecupero) || 'Normale';
-    const rawAttitudeStress = normalizeString(source.attitudineStress) || 'Medio';
-    const rawAttitudeIntensity = normalizeString(source.attitudineIntensita) || 'Bilanciato';
-    const hasFoodRestrictions = source.allergiePresenti === true || normalizeString(source.allergiePresenti).toLowerCase() === 'true';
-    const foodRestrictionsNotes = normalizeString(source.allergieNote);
+    const rawEquipmentUiLabel = normalizeString(source.equipaggiamentoUI ?? source.attrezzaturaUI ?? source.equipmentLabel);
+    const rawAttitudeRecovery = normalizeString(source.attitudineRecupero);
+    const rawRecoveryUiLabel = normalizeString(source.stileRecuperoUI ?? source.attitudineRecuperoUI ?? source.recoveryLabel);
+    const rawAttitudeStress = normalizeString(source.attitudineStress);
+    const rawStressUiLabel = normalizeString(source.stileStressUI ?? source.attitudineStressUI ?? source.stressLabel);
+    const rawAttitudeIntensity = normalizeString(source.attitudineIntensita);
+    const rawIntensityScale = parseNumberFromUnknown(source.scalaIntensita ?? source.intensitaScala ?? source.intensityScale);
+    const rawDietRegime = normalizeString(source.regimeAlimentare ?? source.dietRegime ?? source.regime);
+    const rawMealFrequency = parseNumberFromUnknown(source.frequenzaPasti ?? source.mealFrequencyPerDay ?? source.mealFrequency);
+    const hasMealFrequencyField = source.frequenzaPasti !== undefined || source.mealFrequencyPerDay !== undefined || source.mealFrequency !== undefined;
+    const injuryNotes = normalizeString(source.infortuniNote ?? source.injuryNotes);
+    const foodRestrictionsNotes = normalizeString(source.allergieNote ?? source.limitazioniAlimentari);
+    const hasFoodRestrictionsExplicitFlag = source.allergiePresenti === true || normalizeString(source.allergiePresenti).toLowerCase() === 'true';
+    const hasFoodRestrictions = hasFoodRestrictionsExplicitFlag || !!foodRestrictionsNotes;
+
+    const mappedGoal = mapUiLabel(rawGoalUiLabel, GOAL_UI_TO_CANONICAL);
+    const mappedLevel = mapUiLabel(rawLevelUiLabel, LEVEL_UI_TO_CANONICAL);
+    const mappedEquipment = mapUiLabel(rawEquipmentUiLabel, EQUIPMENT_UI_TO_CANONICAL);
+    const mappedRecovery = mapUiLabel(rawRecoveryUiLabel, RECOVERY_UI_TO_CANONICAL);
+    const mappedStress = mapUiLabel(rawStressUiLabel, STRESS_UI_TO_CANONICAL);
+
+    const roundedIntensityScale = Number.isFinite(rawIntensityScale)
+        ? clamp(Math.round(rawIntensityScale), 1, 3)
+        : NaN;
+    const mappedIntensity = Number.isFinite(roundedIntensityScale)
+        ? INTENSITY_SCALE_TO_CANONICAL[roundedIntensityScale as 1 | 2 | 3]
+        : null;
+
+    const canonicalLevel = isOneOf(rawLevel, ALLOWED_LEVELS) ? rawLevel : mappedLevel;
+    const canonicalGoal = isOneOf(rawGoal, ALLOWED_GOALS) ? rawGoal : mappedGoal;
+    const canonicalEquipment = isOneOf(rawEquipment, ALLOWED_EQUIPMENT) ? rawEquipment : mappedEquipment;
+    const canonicalRecovery = rawAttitudeRecovery || mappedRecovery || 'Normale';
+    const canonicalStress = rawAttitudeStress || mappedStress || 'Medio';
+    const canonicalIntensity = rawAttitudeIntensity || mappedIntensity || 'Bilanciato';
 
     const age = parseNumberFromUnknown(source.eta);
     const heightCm = parseNumberFromUnknown(source.altezzaCm ?? source.altezza);
@@ -964,11 +1160,11 @@ function validateAndBuildCanonicalInput(body: unknown): CanonicalValidationResul
         return { ok: false, error: 'Valore sesso non valido' };
     }
 
-    if (!isOneOf(rawLevel, ALLOWED_LEVELS)) {
+    if (!canonicalLevel || !isOneOf(canonicalLevel, ALLOWED_LEVELS)) {
         return { ok: false, error: 'Valore livelloAttuale non valido' };
     }
 
-    if (!isOneOf(rawGoal, ALLOWED_GOALS)) {
+    if (!canonicalGoal || !isOneOf(canonicalGoal, ALLOWED_GOALS)) {
         return { ok: false, error: 'Valore obiettivoPrimario non valido' };
     }
 
@@ -976,20 +1172,40 @@ function validateAndBuildCanonicalInput(body: unknown): CanonicalValidationResul
         return { ok: false, error: 'Valore tempoDisponibile non valido' };
     }
 
-    if (!isOneOf(rawEquipment, ALLOWED_EQUIPMENT)) {
+    if (!canonicalEquipment || !isOneOf(canonicalEquipment, ALLOWED_EQUIPMENT)) {
         return { ok: false, error: 'Valore equipaggiamento non valido' };
     }
 
-    if (!isOneOf(rawAttitudeRecovery, ALLOWED_ATTITUDE_RECOVERY)) {
+    if (!isOneOf(canonicalRecovery, ALLOWED_ATTITUDE_RECOVERY)) {
         return { ok: false, error: 'Valore attitudineRecupero non valido' };
     }
 
-    if (!isOneOf(rawAttitudeStress, ALLOWED_ATTITUDE_STRESS)) {
+    if (!isOneOf(canonicalStress, ALLOWED_ATTITUDE_STRESS)) {
         return { ok: false, error: 'Valore attitudineStress non valido' };
     }
 
-    if (!isOneOf(rawAttitudeIntensity, ALLOWED_ATTITUDE_INTENSITY)) {
+    if (!isOneOf(canonicalIntensity, ALLOWED_ATTITUDE_INTENSITY)) {
         return { ok: false, error: 'Valore attitudineIntensita non valido' };
+    }
+
+    let dietRegime: AllowedDietRegime | undefined;
+    if (rawDietRegime) {
+        if (!isOneOf(rawDietRegime, ALLOWED_DIET_REGIMES)) {
+            return { ok: false, error: 'Valore regimeAlimentare non valido' };
+        }
+        dietRegime = rawDietRegime;
+    }
+
+    let mealFrequencyPerDay: number | undefined;
+    if (hasMealFrequencyField) {
+        if (!Number.isFinite(rawMealFrequency)) {
+            return { ok: false, error: 'Valore frequenzaPasti non valido' };
+        }
+
+        mealFrequencyPerDay = Math.round(rawMealFrequency);
+        if (mealFrequencyPerDay < 2 || mealFrequencyPerDay > 6) {
+            return { ok: false, error: 'La frequenza pasti deve essere compresa tra 2 e 6' };
+        }
     }
 
     if (!Number.isFinite(age) || age < 14 || age > 90) {
@@ -1027,41 +1243,82 @@ function validateAndBuildCanonicalInput(body: unknown): CanonicalValidationResul
         canonicalInput: {
             name: username,
             specific_goal: specificGoal,
+            mission_reason: missionReason || specificGoal,
             age,
             gender: rawGender,
             height_cm: heightCm,
             weight_kg: weightKg,
-            attitude_recovery: rawAttitudeRecovery,
-            attitude_stress: rawAttitudeStress,
-            attitude_intensity: rawAttitudeIntensity,
-            level: rawLevel,
-            goal: rawGoal,
+            attitude_recovery: canonicalRecovery,
+            attitude_recovery_ui: rawRecoveryUiLabel || undefined,
+            attitude_stress: canonicalStress,
+            attitude_stress_ui: rawStressUiLabel || undefined,
+            attitude_intensity: canonicalIntensity,
+            intensity_scale: Number.isFinite(roundedIntensityScale) ? roundedIntensityScale : undefined,
+            level: canonicalLevel,
+            level_ui_label: rawLevelUiLabel || undefined,
+            goal: canonicalGoal,
+            goal_ui_label: rawGoalUiLabel || undefined,
             available_days_per_week: availableDays,
             available_days_label: availableDaysLabel,
             has_food_restrictions: hasFoodRestrictions,
             food_restrictions_notes: foodRestrictionsNotes,
-            equipment: rawEquipment,
+            injury_notes: injuryNotes || undefined,
+            diet_regime: dietRegime,
+            meal_frequency_per_day: mealFrequencyPerDay,
+            equipment: canonicalEquipment,
+            equipment_ui_label: rawEquipmentUiLabel || undefined,
             submitted_at: new Date().toISOString(),
         },
     };
 }
 
 function buildCommonContext(input: CanonicalOnboardingInput): string {
-    return `Nome: ${input.name}
-Obiettivo Personale Specifico: ${input.specific_goal}
-Età: ${input.age}
-Sesso: ${input.gender}
-Altezza: ${input.height_cm} cm
-Peso: ${input.weight_kg} kg
-Disponibilità settimanale: ${input.available_days_per_week} giorni/sett.
-Recupero: ${input.attitude_recovery}
-Stress quotidiano: ${input.attitude_stress}
-Propensione intensità: ${input.attitude_intensity}
-Livello: ${input.level}
-Obiettivo: ${input.goal}
-Tempo disponibile: ${input.available_days_per_week} giorni/sett. (${input.available_days_label})
-Restrizioni alimentari/allergie: ${input.has_food_restrictions ? input.food_restrictions_notes : 'Nessuna dichiarata'}
-Equipaggiamento: ${input.equipment}`;
+    const contextLines: string[] = [
+        `Nome: ${input.name}`,
+        `Obiettivo Personale Specifico: ${input.specific_goal}`,
+        `Motivazione personale: ${input.mission_reason}`,
+        `Età: ${input.age}`,
+        `Sesso: ${input.gender}`,
+        `Altezza: ${input.height_cm} cm`,
+        `Peso: ${input.weight_kg} kg`,
+        `Disponibilità settimanale: ${input.available_days_per_week} giorni/sett.`,
+        `Recupero: ${input.attitude_recovery}`,
+        `Stress quotidiano: ${input.attitude_stress}`,
+        `Propensione intensità: ${input.attitude_intensity}`,
+        `Livello: ${input.level}`,
+        `Obiettivo: ${input.goal}`,
+        `Tempo disponibile: ${input.available_days_per_week} giorni/sett. (${input.available_days_label})`,
+        `Restrizioni alimentari/allergie: ${input.has_food_restrictions ? input.food_restrictions_notes : 'Nessuna dichiarata'}`,
+        `Regime alimentare preferito: ${input.diet_regime || 'Non specificato'}`,
+        `Frequenza pasti preferita: ${input.meal_frequency_per_day || 'Non specificata'}`,
+        `Equipaggiamento: ${input.equipment}`,
+    ];
+
+    if (input.goal_ui_label) {
+        contextLines.push(`Goal selezionato in UI: ${input.goal_ui_label}`);
+    }
+
+    if (input.level_ui_label) {
+        contextLines.push(`Livello selezionato in UI: ${input.level_ui_label}`);
+    }
+
+    if (input.attitude_stress_ui) {
+        contextLines.push(`Stress dichiarato in UI: ${input.attitude_stress_ui}`);
+    }
+
+    if (input.attitude_recovery_ui) {
+        contextLines.push(`Recupero dichiarato in UI: ${input.attitude_recovery_ui}`);
+    }
+
+    if (input.equipment_ui_label) {
+        contextLines.push(`Attrezzatura dichiarata in UI: ${input.equipment_ui_label}`);
+    }
+
+    if (input.injury_notes) {
+        contextLines.push(`Infortuni o dolori da considerare: ${input.injury_notes}`);
+    }
+
+    return contextLines.join('\n');
 }
 
 function buildWorkoutPrompt(input: CanonicalOnboardingInput, commonContext: string): string {
@@ -1104,6 +1361,8 @@ REGOLE TASSATIVE:
 2. L'output deve essere SOLO E UNICAMENTE un JSON valido (privo di markdown addizionali come \`\`\`json).
 3. ${input.has_food_restrictions ? `ESCLUDI COMPLETAMENTE questi alimenti/condizioni: ${input.food_restrictions_notes}.` : 'Se non ci sono allergie dichiarate, mantieni il piano alimentare standard bilanciato.'}
 4. ${restrictionPromptHint}
+5. ${input.diet_regime ? `RISPETTA il regime alimentare ${input.diet_regime}.` : 'Se non viene indicato un regime, mantieni una dieta onnivora bilanciata.'}
+6. ${input.meal_frequency_per_day ? `Distribuisci i pasti in ${input.meal_frequency_per_day} momenti alimentari al giorno (inclusi eventuali snack).` : 'Distribuisci i pasti in 3 pasti principali con snack opzionale.'}
 
 STRUTTURA JSON DA RISPETTARE:
 {
@@ -1142,6 +1401,7 @@ function buildSafePlanData(
     const dietPlanWithRestrictions = enforceDietaryRestrictionsOnDietPlan(sanitizedDietPlan, canonicalInput);
     const sanitizedDietRules = sanitizeDietRules(planData.diet_rules, fallbackPlan.diet_rules);
     const dietRulesWithRestrictions = mergeFoodRestrictionsIntoDietRules(sanitizedDietRules, canonicalInput);
+    const dietRulesWithPreferences = mergeDietRegimeIntoDietRules(dietRulesWithRestrictions, canonicalInput);
 
     return {
         personal_info: {
@@ -1154,7 +1414,7 @@ function buildSafePlanData(
         targets: sanitizeTargets(planData.targets, fallbackPlan.targets),
         workout_plan: sanitizeWorkoutPlan(planData.workout_plan, fallbackPlan.workout_plan),
         diet_plan: dietPlanWithRestrictions,
-        diet_rules: dietRulesWithRestrictions,
+        diet_rules: dietRulesWithPreferences,
         onboarding_input: canonicalInput,
     };
 }

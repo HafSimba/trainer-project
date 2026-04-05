@@ -98,21 +98,31 @@ export interface UserPersonalInfo {
 export interface OnboardingInput {
     name: string;
     specific_goal?: string;
+    mission_reason?: string;
     age: number;
     gender: OnboardingGender;
     height_cm: number;
     weight_kg: number;
     attitude_consistency?: string;
     attitude_recovery: string;
+    attitude_recovery_ui?: string;
     attitude_stress: string;
+    attitude_stress_ui?: string;
     attitude_intensity: string;
+    intensity_scale?: number;
     level: string;
+    level_ui_label?: string;
     goal: string;
+    goal_ui_label?: string;
     available_days_per_week: number;
     available_days_label: string;
     has_food_restrictions: boolean;
     food_restrictions_notes: string;
+    injury_notes?: string;
+    diet_regime?: 'Vegano' | 'Vegetariano' | 'Onnivoro' | 'Keto' | 'Paleo';
+    meal_frequency_per_day?: number;
     equipment: string;
+    equipment_ui_label?: string;
     submitted_at: string;
 }
 
