@@ -4,8 +4,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { COLLECTIONS, getCollection } from "@/lib/mongodb";
-import { PROTOTYPE_USER_ID } from "@/lib/config/user";
+import { USER_ID_COOKIE_NAME, resolveUserId } from "@/lib/config/user";
 import type { DailyLog, UserProfile, WorkoutDay } from "@/lib/types/database";
+import { cookies } from "next/headers";
 
 const DAYS_OF_WEEK = ["Domenica", "Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato"];
 const DEFAULT_TARGET_CALORIES = 2000;
@@ -76,6 +77,8 @@ function resolveNextMeal(
 async function loadDashboardData(): Promise<DashboardData> {
     const currentDayName = DAYS_OF_WEEK[new Date().getDay()];
     const todayString = new Date().toISOString().split("T")[0];
+    const cookieStore = await cookies();
+    const activeUserId = resolveUserId(cookieStore.get(USER_ID_COOKIE_NAME)?.value);
 
     try {
         const [dailyLogsCollection, profilesCollection] = await Promise.all([
@@ -84,8 +87,8 @@ async function loadDashboardData(): Promise<DashboardData> {
         ]);
 
         const [log, profile] = await Promise.all([
-            dailyLogsCollection.findOne({ userId: PROTOTYPE_USER_ID, date: todayString }),
-            profilesCollection.findOne({ userId: PROTOTYPE_USER_ID }),
+            dailyLogsCollection.findOne({ userId: activeUserId, date: todayString }),
+            profilesCollection.findOne({ userId: activeUserId }),
         ]);
 
         const workoutToday = profile?.workout_plan?.schedule?.find(

@@ -7,6 +7,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Loader2, ArrowRight, ArrowLeft, Sparkles } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { USER_ID_COOKIE_NAME, USER_ID_STORAGE_KEY } from '@/lib/config/user';
 import { extractApiError, readJsonResponse } from '@/lib/utils';
 
 const LEVEL_OPTIONS = ['Principiante', 'Intermedio', 'Esperto'];
@@ -17,6 +18,13 @@ const ATTITUDE_RECOVERY_OPTIONS = ['Lento', 'Normale', 'Rapido'];
 const ATTITUDE_STRESS_OPTIONS = ['Basso', 'Medio', 'Alto'];
 const ATTITUDE_INTENSITY_OPTIONS = ['Progressivo', 'Bilanciato', 'Spinto'];
 const INTERACTIVE_STEPS = 4;
+const MAX_LOADING_PROGRESS = 96;
+const LOADING_PHASES = [
+    { label: 'Validazione profilo', thresholdMs: 0 },
+    { label: 'Generazione scheda allenamento', thresholdMs: 3000 },
+    { label: 'Generazione piano alimentare', thresholdMs: 9000 },
+    { label: 'Verifica finale e salvataggio', thresholdMs: 17000 },
+];
 
 type Step = 0 | 1 | 2 | 3 | 4;
 type AllergyChoice = '' | 'nessuna' | 'presenti';
@@ -102,6 +110,27 @@ function buildGeneratePlanPayload(formData: OnboardingFormData) {
     };
 }
 
+function getOrCreateClientUserId(): string {
+    if (typeof window === 'undefined') return '';
+
+    const existing = window.localStorage.getItem(USER_ID_STORAGE_KEY);
+    if (existing && existing.trim()) {
+        return existing;
+    }
+
+    const generated = typeof window.crypto?.randomUUID === 'function'
+        ? window.crypto.randomUUID()
+        : `user-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+
+    window.localStorage.setItem(USER_ID_STORAGE_KEY, generated);
+    return generated;
+}
+
+function persistUserIdCookie(userId: string): void {
+    if (!userId || typeof document === 'undefined') return;
+    document.cookie = `${USER_ID_COOKIE_NAME}=${encodeURIComponent(userId)}; path=/; max-age=31536000; samesite=lax`;
+}
+
 type SliderFieldProps = {
     label: string;
     reason: string;
@@ -147,6 +176,7 @@ export default function Onboarding() {
     const [errorMessage, setErrorMessage] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [progress, setProgress] = useState(0);
+    const [loadingElapsedMs, setLoadingElapsedMs] = useState(0);
     const [formData, setFormData] = useState<OnboardingFormData>(INITIAL_FORM_DATA);
 
     const updateFormField = <K extends keyof OnboardingFormData>(field: K, value: OnboardingFormData[K]) => {
@@ -161,24 +191,31 @@ export default function Onboarding() {
     useEffect(() => {
         if (!isLoading) return;
 
+        const loadingStartedAtMs = Date.now();
+
         const intervalId = setInterval(() => {
-            setProgress((prev) => {
-                if (prev >= 92) return prev;
-                const increment = Math.floor(Math.random() * 8) + 3;
-                return Math.min(92, prev + increment);
-            });
-        }, 650);
+            const elapsedMs = Date.now() - loadingStartedAtMs;
+            setLoadingElapsedMs(elapsedMs);
+
+            const nextProgress = elapsedMs < 8000
+                ? 8 + ((elapsedMs / 8000) * 55)
+                : elapsedMs < 20000
+                    ? 63 + (((elapsedMs - 8000) / 12000) * 23)
+                    : 86 + Math.min((((elapsedMs - 20000) / 25000) * 10), 10);
+
+            setProgress((prev) => Math.max(prev, Math.min(MAX_LOADING_PROGRESS, nextProgress)));
+        }, 350);
 
         return () => clearInterval(intervalId);
     }, [isLoading]);
 
     const loadingMessage = useMemo(() => {
-        if (progress < 20) return 'Sto conoscendo il tuo profilo...';
-        if (progress < 45) return 'Sto analizzando i tuoi dati corporei...';
-        if (progress < 70) return 'Sto pianificando i tuoi allenamenti...';
-        if (progress < 95) return 'Sto preparando il menu settimanale...';
-        return 'Sto rifinendo i dettagli finali...';
-    }, [progress]);
+        if (loadingElapsedMs < 2500) return 'Sto validando il tuo profilo e i dati inseriti...';
+        if (loadingElapsedMs < 9000) return 'Sto generando la tua scheda di allenamento...';
+        if (loadingElapsedMs < 17000) return 'Sto costruendo il menu settimanale personalizzato...';
+        if (loadingElapsedMs < 26000) return 'Sto verificando coerenza, allergie e target...';
+        return 'L\'elaborazione richiede piu tempo del previsto, sto finalizzando il risultato.';
+    }, [loadingElapsedMs]);
 
     const interactiveProgress = useMemo(() => getInteractiveProgress(step), [step]);
 
@@ -238,10 +275,17 @@ export default function Onboarding() {
         setErrorMessage('');
         setStep(4);
         setIsLoading(true);
+        setLoadingElapsedMs(0);
         setProgress(8);
 
         try {
-            const payload = buildGeneratePlanPayload(formData);
+            const clientUserId = getOrCreateClientUserId();
+            persistUserIdCookie(clientUserId);
+
+            const payload = {
+                ...buildGeneratePlanPayload(formData),
+                userId: clientUserId,
+            };
 
             const res = await fetch('/api/generate-plan', {
                 method: 'POST',
@@ -263,6 +307,7 @@ export default function Onboarding() {
             setErrorMessage('Non sono riuscito a completare il piano. Riprova tra poco.');
             setStep(3);
             setProgress(0);
+            setLoadingElapsedMs(0);
         } finally {
             setIsLoading(false);
         }
@@ -501,7 +546,28 @@ export default function Onboarding() {
                                         <span>{Math.round(progress)}%</span>
                                     </div>
                                     <Progress aria-label="Progressione generazione piano" value={progress} className="h-2.5 rounded-full bg-muted" />
+                                    <p className="text-center text-[11px] text-muted-foreground">Tempo trascorso: {Math.max(1, Math.floor(loadingElapsedMs / 1000))}s</p>
                                 </div>
+
+                                <ul className="space-y-2 rounded-xl border border-border/70 bg-surface-soft/40 p-3">
+                                    {LOADING_PHASES.map((phase, index) => {
+                                        const nextThreshold = LOADING_PHASES[index + 1]?.thresholdMs ?? Number.POSITIVE_INFINITY;
+                                        const isCompleted = progress >= 100 || loadingElapsedMs >= nextThreshold;
+                                        const isActive = !isCompleted && loadingElapsedMs >= phase.thresholdMs;
+
+                                        return (
+                                            <li key={phase.label} className="flex items-center justify-between text-xs">
+                                                <span className={isActive ? 'font-semibold text-primary' : isCompleted ? 'text-foreground' : 'text-muted-foreground'}>
+                                                    {phase.label}
+                                                </span>
+                                                <span className={isCompleted ? 'text-success' : isActive ? 'text-primary' : 'text-muted-foreground'}>
+                                                    {isCompleted ? 'Completato' : isActive ? 'In corso' : 'In attesa'}
+                                                </span>
+                                            </li>
+                                        );
+                                    })}
+                                </ul>
+
                                 <div className="flex items-center justify-center gap-2 text-sm text-primary">
                                     <Loader2 className="h-4 w-4 animate-spin" />
                                     <span>Ti tengo aggiornato passo per passo...</span>

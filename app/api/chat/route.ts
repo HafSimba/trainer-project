@@ -1,5 +1,6 @@
 ﻿import clientPromise, { COLLECTIONS, DATABASE_NAME } from "@/lib/mongodb";
-import { PROTOTYPE_USER_ID } from "@/lib/config/user";
+import { cookies } from "next/headers";
+import { USER_ID_COOKIE_NAME, resolveUserId } from "@/lib/config/user";
 import { getChatModel, getLlmClient } from "@/lib/llm/client";
 
 export const revalidate = 0;
@@ -275,7 +276,7 @@ function buildWorkoutComparison(
     };
 }
 
-async function fetchUserContext(today: string): Promise<{
+async function fetchUserContext(today: string, userId: string): Promise<{
     userProfile: UserProfileSnapshot | null;
     dailyLog: DailyLogSnapshot | null;
 }> {
@@ -284,8 +285,8 @@ async function fetchUserContext(today: string): Promise<{
         const db = mongoClient.db(DATABASE_NAME);
 
         const [userProfile, dailyLog] = await Promise.all([
-            db.collection<UserProfileSnapshot>(COLLECTIONS.userProfiles).findOne({ userId: PROTOTYPE_USER_ID }),
-            db.collection<DailyLogSnapshot>(COLLECTIONS.dailyLogs).findOne({ userId: PROTOTYPE_USER_ID, date: today }),
+            db.collection<UserProfileSnapshot>(COLLECTIONS.userProfiles).findOne({ userId }),
+            db.collection<DailyLogSnapshot>(COLLECTIONS.dailyLogs).findOne({ userId, date: today }),
         ]);
 
         return { userProfile, dailyLog };
@@ -343,7 +344,10 @@ function buildSystemMessage(
 
 export async function POST(req: Request) {
     try {
-        const body = await req.json() as { messages?: unknown };
+        const body = await req.json() as { messages?: unknown; userId?: unknown };
+        const cookieStore = await cookies();
+        const userIdFromCookie = cookieStore.get(USER_ID_COOKIE_NAME)?.value;
+        const activeUserId = resolveUserId(body.userId, userIdFromCookie);
         const cleanMessages = sanitizeMessages(body.messages);
         const client = getLlmClient();
         const chatModel = getChatModel();
@@ -355,7 +359,7 @@ export async function POST(req: Request) {
         const today = new Date().toISOString().split('T')[0];
         const currentDayName = DAYS_OF_WEEK[new Date().getDay()];
 
-        const { userProfile, dailyLog } = await fetchUserContext(today);
+        const { userProfile, dailyLog } = await fetchUserContext(today, activeUserId);
 
         const profileContextStr = buildProfileContext(userProfile);
         const mealsContextStr = buildMealsContext(dailyLog);

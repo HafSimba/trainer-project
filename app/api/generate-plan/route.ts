@@ -1,6 +1,8 @@
 ﻿import clientPromise, { COLLECTIONS, DATABASE_NAME } from '@/lib/mongodb';
 import { NextResponse } from 'next/server';
-import { PROTOTYPE_USER_ID } from '@/lib/config/user';
+import { cookies } from 'next/headers';
+import { randomUUID } from 'node:crypto';
+import { USER_ID_COOKIE_NAME, resolveUserId } from '@/lib/config/user';
 import { getGenerationModels, getLlmClient } from '@/lib/llm/client';
 import { createConflictSafeLegacyUnset, sanitizeLegacyProfileFields } from '@/lib/profile-legacy';
 import { UserProfile } from '@/lib/types/database';
@@ -17,6 +19,28 @@ const ALLOWED_ATTITUDE_STRESS = ['Basso', 'Medio', 'Alto'] as const;
 const ALLOWED_ATTITUDE_INTENSITY = ['Progressivo', 'Bilanciato', 'Spinto'] as const;
 const ALLOWED_ACTIVITY_LEVELS = ['sedentario', 'leggero', 'moderato', 'attivo', 'molto_attivo'] as const;
 const WEEK_DAYS = ['Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato', 'Domenica'] as const;
+
+const DEFAULT_LLM_MAX_TOKENS = 3000;
+const DEFAULT_LLM_MAX_TOKENS_WORKOUT = 1800;
+const DEFAULT_LLM_MAX_TOKENS_DIET = 3800;
+const DEFAULT_LLM_TIMEOUT_MS = 24000;
+const DEFAULT_LLM_MAX_ATTEMPTS = 2;
+
+function parseBoundedInt(rawValue: string | undefined, fallback: number, min: number, max: number): number {
+    const normalized = (rawValue || '').trim();
+    if (!normalized) return fallback;
+
+    const parsed = Number.parseInt(normalized, 10);
+    if (!Number.isFinite(parsed)) return fallback;
+    return clamp(parsed, min, max);
+}
+
+const LLM_MAX_TOKENS = parseBoundedInt(process.env.LLM_MAX_TOKENS, DEFAULT_LLM_MAX_TOKENS, 800, 5000);
+const LLM_MAX_TOKENS_WORKOUT = parseBoundedInt(process.env.LLM_MAX_TOKENS_WORKOUT, DEFAULT_LLM_MAX_TOKENS_WORKOUT, 800, 5000);
+const LLM_MAX_TOKENS_DIET = parseBoundedInt(process.env.LLM_MAX_TOKENS_DIET, DEFAULT_LLM_MAX_TOKENS_DIET, 1200, 5000);
+const LLM_REQUEST_TIMEOUT_MS = parseBoundedInt(process.env.LLM_REQUEST_TIMEOUT_MS, DEFAULT_LLM_TIMEOUT_MS, 3000, 120000);
+const LLM_MAX_ATTEMPTS = parseBoundedInt(process.env.LLM_MAX_ATTEMPTS, DEFAULT_LLM_MAX_ATTEMPTS, 1, 3);
+
 type AllowedGender = typeof ALLOWED_GENDERS[number];
 
 type CanonicalOnboardingInput = {
@@ -68,6 +92,54 @@ type DetectedRestriction = {
     promptHint: string;
     fallbackFood: string;
 };
+
+type PlanPartAttemptMetrics = {
+    model: string;
+    attempt: number;
+    duration_ms: number;
+    success: boolean;
+    retryable?: boolean;
+    error_message?: string;
+};
+
+type PlanPartMetrics = {
+    label: string;
+    total_duration_ms: number;
+    model_attempts: PlanPartAttemptMetrics[];
+    used_model: string | null;
+    used_attempt: number | null;
+};
+
+type PlanPartResponse = {
+    planData: PlanData;
+    metrics: PlanPartMetrics;
+};
+
+type GeneratePlanMetrics = {
+    request_id: string;
+    started_at: string;
+    total_duration_ms: number;
+    body_parse_ms: number;
+    validation_ms: number;
+    prompt_build_ms: number;
+    llm_parallel_ms: number;
+    merge_sanitize_ms: number;
+    save_profile_ms: number;
+    fallback_workout: boolean;
+    fallback_diet: boolean;
+    workout: PlanPartMetrics | null;
+    diet: PlanPartMetrics | null;
+};
+
+class PlanPartGenerationError extends Error {
+    metrics: PlanPartMetrics;
+
+    constructor(message: string, metrics: PlanPartMetrics) {
+        super(message);
+        this.name = 'PlanPartGenerationError';
+        this.metrics = metrics;
+    }
+}
 
 function parseNumberFromUnknown(value: unknown): number {
     if (typeof value === 'number') return value;
@@ -137,38 +209,314 @@ function parseAiJson(content: string, label: string): PlanData {
     }
 }
 
-function buildFallbackPlan(input: CanonicalOnboardingInput): Required<PlanData> {
-    const caloriesBase = Math.round(22 * input.weight_kg + (input.goal === 'Ipertrofia' ? 350 : input.goal === 'Dimagrimento' ? -300 : 0));
-    const dailyCalories = clamp(caloriesBase, 1400, 4200);
-    const dailyProtein = clamp(Math.round(input.weight_kg * (input.goal === 'Ipertrofia' ? 2 : 1.8)), 90, 260);
-    const dailyFats = clamp(Math.round(input.weight_kg * 0.9), 45, 130);
-    const dailyCarbs = Math.max(80, Math.round((dailyCalories - (dailyProtein * 4 + dailyFats * 9)) / 4));
+type ExercisePool = {
+    push: string[];
+    pull: string[];
+    legs: string[];
+    core: string[];
+};
 
-    const workoutLabels = ['Full Body A', 'Full Body B', 'Upper', 'Lower', 'Push', 'Pull', 'Legs'];
-    const schedule = WEEK_DAYS.slice(0, input.available_days_per_week).map((dayName, index) => ({
-        day_name: dayName,
-        workout_type: workoutLabels[index % workoutLabels.length],
-        exercises: [
-            { name: 'Squat o Variante', sets: 3, reps: '8-10', notes: 'Carico progressivo' },
-            { name: 'Spinta Orizzontale', sets: 3, reps: '8-12', notes: 'Controllo tecnico' },
-            { name: 'Trazione', sets: 3, reps: '8-12', notes: 'Range completo' },
+function computeProfileSeed(input: CanonicalOnboardingInput): number {
+    const fingerprint = [
+        input.name,
+        input.goal,
+        input.level,
+        input.equipment,
+        String(input.available_days_per_week),
+        input.attitude_intensity,
+        input.attitude_stress,
+    ].join('|');
+
+    return Array.from(fingerprint).reduce((accumulator, currentChar) => {
+        return (accumulator * 31 + currentChar.charCodeAt(0)) % 10007;
+    }, 7);
+}
+
+function resolveExercisePool(equipment: string): ExercisePool {
+    if (equipment === 'Palestra attrezzata') {
+        return {
+            push: ['Panca piana bilanciere', 'Military press manubri', 'Chest press macchina', 'Dip assistite', 'Croci ai cavi'],
+            pull: ['Lat machine presa prona', 'Rematore manubrio', 'Pulley basso', 'Face pull ai cavi', 'Curl bilanciere EZ'],
+            legs: ['Back squat', 'Leg press', 'Affondi camminati', 'Romanian deadlift', 'Leg curl'],
+            core: ['Plank', 'Dead bug', 'Pallof press', 'Crunch su fitball'],
+        };
+    }
+
+    if (equipment === 'Attrezzatura base in casa') {
+        return {
+            push: ['Push-up', 'Shoulder press con manubri', 'Floor press con manubri', 'Pike push-up', 'Alzate laterali'],
+            pull: ['Rematore con manubri', 'Rematore con elastico', 'Pullover con manubrio', 'Curl con manubri', 'Reverse fly con elastico'],
+            legs: ['Goblet squat', 'Affondi indietro', 'Hip thrust', 'Stacco rumeno con manubri', 'Step-up su panca'],
+            core: ['Plank', 'Mountain climber', 'Russian twist', 'Hollow hold'],
+        };
+    }
+
+    return {
+        push: ['Push-up', 'Push-up inclinati', 'Dip su sedia', 'Pike push-up', 'Push-up presa stretta'],
+        pull: ['Rematore inverso sotto tavolo', 'Superman hold', 'Towel row isometrico', 'Reverse snow angel', 'Curl con asciugamano isometrico'],
+        legs: ['Squat a corpo libero', 'Affondi alternati', 'Bulgarian split squat', 'Glute bridge', 'Calf raise'],
+        core: ['Plank', 'Side plank', 'Dead bug', 'Leg raise'],
+    };
+}
+
+function resolveSplitTemplate(input: CanonicalOnboardingInput): { splitName: string; dayTypes: string[] } {
+    const days = input.available_days_per_week;
+    const isBeginner = input.level === 'Principiante';
+
+    if (days <= 2) {
+        return { splitName: 'Full Body Essenziale', dayTypes: ['Full Body A', 'Full Body B'] };
+    }
+
+    if (days === 3) {
+        if (isBeginner) {
+            return { splitName: 'Full Body Progressivo', dayTypes: ['Full Body A', 'Full Body B', 'Full Body C'] };
+        }
+        return { splitName: 'Push Pull Legs', dayTypes: ['Push', 'Pull', 'Legs'] };
+    }
+
+    if (days === 4) {
+        return { splitName: 'Upper Lower', dayTypes: ['Upper A', 'Lower A', 'Upper B', 'Lower B'] };
+    }
+
+    if (days === 5) {
+        return { splitName: 'Push Pull Legs + Upper/Lower', dayTypes: ['Push', 'Pull', 'Legs', 'Upper', 'Lower'] };
+    }
+
+    if (days === 6) {
+        return { splitName: 'PPL A/B', dayTypes: ['Push A', 'Pull A', 'Legs A', 'Push B', 'Pull B', 'Legs B'] };
+    }
+
+    return {
+        splitName: 'Settimana Completa Bilanciata',
+        dayTypes: ['Push', 'Pull', 'Legs', 'Upper', 'Lower', 'Full Body', 'Conditioning'],
+    };
+}
+
+function pickBySeed(options: string[], seed: number, offset: number): string {
+    if (options.length === 0) return 'Esercizio base';
+    const index = Math.abs(seed + offset) % options.length;
+    return options[index];
+}
+
+function resolveRepRange(goal: string, dayType: string): { main: string; accessory: string } {
+    if (dayType.toLowerCase().includes('conditioning')) {
+        return { main: '30-45 sec', accessory: '20-30 sec' };
+    }
+
+    if (goal === 'Ipertrofia') {
+        return { main: '6-10', accessory: '10-15' };
+    }
+
+    if (goal === 'Dimagrimento') {
+        return { main: '10-14', accessory: '12-18' };
+    }
+
+    if (goal === 'Definizione') {
+        return { main: '8-12', accessory: '12-15' };
+    }
+
+    return { main: '8-10', accessory: '10-12' };
+}
+
+function resolveSets(input: CanonicalOnboardingInput): number {
+    const baseSets = input.level === 'Esperto' ? 4 : input.level === 'Intermedio' ? 3 : 2;
+    const stressPenalty = input.attitude_stress === 'Alto' ? 1 : 0;
+    const intensityBonus = input.attitude_intensity === 'Spinto' ? 1 : 0;
+    return clamp(baseSets - stressPenalty + intensityBonus, 2, 5);
+}
+
+function buildFallbackExercisesForDay(
+    dayType: string,
+    input: CanonicalOnboardingInput,
+    exercisePool: ExercisePool,
+    seed: number,
+    dayIndex: number
+): UserProfile['workout_plan']['schedule'][number]['exercises'] {
+    const normalizedDayType = dayType.toLowerCase();
+    const sets = resolveSets(input);
+    const reps = resolveRepRange(input.goal, dayType);
+    const intensityNote = input.attitude_intensity === 'Spinto'
+        ? 'Mantieni buffer 1-2 ripetizioni nelle serie principali.'
+        : input.attitude_intensity === 'Progressivo'
+            ? 'Incremento graduale dei carichi settimana dopo settimana.'
+            : 'Volume bilanciato con tecnica prioritaria.';
+
+    const byType = {
+        push: [
+            pickBySeed(exercisePool.push, seed, dayIndex),
+            pickBySeed(exercisePool.push, seed, dayIndex + 3),
+            pickBySeed(exercisePool.core, seed, dayIndex + 7),
         ],
-    }));
+        pull: [
+            pickBySeed(exercisePool.pull, seed, dayIndex),
+            pickBySeed(exercisePool.pull, seed, dayIndex + 2),
+            pickBySeed(exercisePool.core, seed, dayIndex + 9),
+        ],
+        legs: [
+            pickBySeed(exercisePool.legs, seed, dayIndex),
+            pickBySeed(exercisePool.legs, seed, dayIndex + 4),
+            pickBySeed(exercisePool.core, seed, dayIndex + 11),
+        ],
+        upper: [
+            pickBySeed(exercisePool.push, seed, dayIndex),
+            pickBySeed(exercisePool.pull, seed, dayIndex + 1),
+            pickBySeed(exercisePool.core, seed, dayIndex + 5),
+        ],
+        lower: [
+            pickBySeed(exercisePool.legs, seed, dayIndex),
+            pickBySeed(exercisePool.legs, seed, dayIndex + 1),
+            pickBySeed(exercisePool.core, seed, dayIndex + 6),
+        ],
+        full: [
+            pickBySeed(exercisePool.legs, seed, dayIndex),
+            pickBySeed(exercisePool.push, seed, dayIndex + 1),
+            pickBySeed(exercisePool.pull, seed, dayIndex + 2),
+            pickBySeed(exercisePool.core, seed, dayIndex + 3),
+        ],
+        conditioning: [
+            'Circuito metabolico 20 min',
+            pickBySeed(exercisePool.legs, seed, dayIndex + 1),
+            pickBySeed(exercisePool.core, seed, dayIndex + 2),
+        ],
+    };
 
-    const breakfast = ['60g fiocchi d\'avena', '200ml latte o bevanda vegetale', '20g frutta secca'];
-    const lunch = ['120g riso o pasta', '150g pollo/tacchino', '200g verdure'];
-    const dinner = ['200g pesce/carne magra', '250g patate o 100g pane', '200g verdure'];
-    const snack = ['170g yogurt greco', '1 frutto'];
+    const selectedTemplate = normalizedDayType.includes('push')
+        ? byType.push
+        : normalizedDayType.includes('pull')
+            ? byType.pull
+            : normalizedDayType.includes('legs')
+                ? byType.legs
+                : normalizedDayType.includes('upper')
+                    ? byType.upper
+                    : normalizedDayType.includes('lower')
+                        ? byType.lower
+                        : normalizedDayType.includes('conditioning')
+                            ? byType.conditioning
+                            : byType.full;
 
-    const weeklySchedule = WEEK_DAYS.map((dayName) => ({
-        day_name: dayName,
-        meals: {
-            colazione: breakfast,
-            pranzo: lunch,
-            cena: dinner,
-            snack,
-        },
+    return selectedTemplate.map((exerciseName, index) => ({
+        name: exerciseName,
+        sets,
+        reps: index === selectedTemplate.length - 1 ? reps.accessory : reps.main,
+        notes: index === 0 ? intensityNote : 'Esecuzione tecnica controllata e ROM completo.',
     }));
+}
+
+function buildDietTemplates(input: CanonicalOnboardingInput) {
+    const proteinMain = clamp(Math.round(input.weight_kg * 1.9), 110, 240);
+    const lunchCarbs = input.goal === 'Ipertrofia' ? 130 : input.goal === 'Dimagrimento' ? 80 : 105;
+    const dinnerCarbs = input.goal === 'Ipertrofia' ? 110 : input.goal === 'Dimagrimento' ? 70 : 95;
+    const breakfastCarbs = input.goal === 'Ipertrofia' ? 80 : input.goal === 'Dimagrimento' ? 55 : 65;
+    const snackProtein = clamp(Math.round(input.weight_kg * 0.35), 20, 45);
+
+    return {
+        colazione: [
+            [`${breakfastCarbs}g fiocchi d'avena`, '200ml latte o bevanda vegetale', '1 frutto'],
+            [`${breakfastCarbs - 5}g pane integrale`, `${Math.round(snackProtein + 5)}g yogurt greco`, '15g frutta secca'],
+            [`${breakfastCarbs}g cereali integrali`, '250ml bevanda vegetale', '20g burro di arachidi'],
+            [`${breakfastCarbs - 10}g muesli`, '200g skyr', '1 banana'],
+        ],
+        pranzo: [
+            [`${lunchCarbs}g riso basmati`, `${proteinMain}g pollo/tacchino`, '200g verdure'],
+            [`${lunchCarbs - 10}g pasta`, `${Math.round(proteinMain - 20)}g tonno naturale`, '200g verdure'],
+            [`${lunchCarbs - 5}g couscous`, `${Math.round(proteinMain - 10)}g legumi`, '200g ortaggi'],
+            [`${lunchCarbs}g patate`, `${Math.round(proteinMain - 15)}g pesce bianco`, 'insalata mista'],
+        ],
+        cena: [
+            [`${proteinMain}g pesce/carne magra`, `${dinnerCarbs}g pane o cereali`, '200g verdure'],
+            [`${Math.round(proteinMain - 10)}g uova o albumi`, `${dinnerCarbs - 10}g riso`, 'verdure cotte'],
+            [`${Math.round(proteinMain - 20)}g tofu/tempeh`, `${dinnerCarbs}g patate`, 'verdure di stagione'],
+            [`${proteinMain}g carne bianca`, `${dinnerCarbs - 5}g quinoa`, 'insalata + olio EVO'],
+        ],
+        snack: [
+            [`${snackProtein}g whey o proteine equivalenti`, '1 frutto'],
+            ['170g yogurt greco', '20g frutta secca'],
+            ['2 gallette di riso', `${Math.round(snackProtein + 2)}g bresaola o tacchino`],
+            ['1 panino piccolo integrale', `${Math.round(snackProtein)}g hummus o ricotta`],
+        ],
+    };
+}
+
+function resolveActivityMultiplier(input: CanonicalOnboardingInput): number {
+    const baseByDays = input.available_days_per_week >= 6
+        ? 1.62
+        : input.available_days_per_week >= 4
+            ? 1.5
+            : input.available_days_per_week >= 2
+                ? 1.4
+                : 1.3;
+
+    const recoveryAdjustment = input.attitude_recovery === 'Rapido'
+        ? 0.04
+        : input.attitude_recovery === 'Lento'
+            ? -0.04
+            : 0;
+
+    const stressAdjustment = input.attitude_stress === 'Alto'
+        ? -0.05
+        : input.attitude_stress === 'Basso'
+            ? 0.02
+            : 0;
+
+    return clamp(baseByDays + recoveryAdjustment + stressAdjustment, 1.2, 1.8);
+}
+
+function resolveGoalCaloriesAdjustment(goal: CanonicalOnboardingInput['goal']): number {
+    if (goal === 'Ipertrofia') return 260;
+    if (goal === 'Dimagrimento') return -320;
+    if (goal === 'Definizione') return -180;
+    return 0;
+}
+
+function computeFallbackCaloriesTarget(input: CanonicalOnboardingInput): number {
+    const genderOffset = input.gender === 'Uomo'
+        ? 5
+        : input.gender === 'Donna'
+            ? -161
+            : -78;
+
+    const bmr = 10 * input.weight_kg + 6.25 * input.height_cm - 5 * input.age + genderOffset;
+    const tdee = bmr * resolveActivityMultiplier(input);
+    const adjusted = Math.round(tdee + resolveGoalCaloriesAdjustment(input.goal));
+
+    return clamp(adjusted, 1200, 4600);
+}
+
+function buildFallbackPlan(input: CanonicalOnboardingInput): Required<PlanData> {
+    const seed = computeProfileSeed(input);
+    const dailyCalories = computeFallbackCaloriesTarget(input);
+    const dailyProtein = clamp(Math.round(input.weight_kg * (input.goal === 'Ipertrofia' ? 2.1 : input.goal === 'Dimagrimento' ? 2 : 1.8)), 90, 260);
+    const dailyFats = clamp(Math.round(input.weight_kg * (input.goal === 'Dimagrimento' ? 0.8 : 0.9)), 40, 130);
+    const dailyCarbs = Math.max(70, Math.round((dailyCalories - (dailyProtein * 4 + dailyFats * 9)) / 4));
+
+    const exercisePool = resolveExercisePool(input.equipment);
+    const splitTemplate = resolveSplitTemplate(input);
+
+    const schedule = WEEK_DAYS.slice(0, input.available_days_per_week).map((dayName, index) => {
+        const dayType = splitTemplate.dayTypes[index % splitTemplate.dayTypes.length];
+
+        return {
+            day_name: dayName,
+            workout_type: dayType,
+            exercises: buildFallbackExercisesForDay(dayType, input, exercisePool, seed, index),
+        };
+    });
+
+    const dietTemplates = buildDietTemplates(input);
+
+    const weeklySchedule = WEEK_DAYS.map((dayName, index) => {
+        const rotationIndex = Math.abs(seed + index) % dietTemplates.colazione.length;
+
+        return {
+            day_name: dayName,
+            meals: {
+                colazione: dietTemplates.colazione[rotationIndex],
+                pranzo: dietTemplates.pranzo[(rotationIndex + 1) % dietTemplates.pranzo.length],
+                cena: dietTemplates.cena[(rotationIndex + 2) % dietTemplates.cena.length],
+                snack: dietTemplates.snack[(rotationIndex + 3) % dietTemplates.snack.length],
+            },
+        };
+    });
 
     return {
         personal_info: {
@@ -186,8 +534,8 @@ function buildFallbackPlan(input: CanonicalOnboardingInput): Required<PlanData> 
             daily_water_ml: 2500,
         },
         workout_plan: {
-            split_name: `${input.available_days_per_week} giorni / settimana`,
-            description: 'Piano fallback generato lato server in assenza di risposta AI valida.',
+            split_name: `${splitTemplate.splitName} (${input.available_days_per_week} giorni/settimana)`,
+            description: 'Piano fallback personalizzato lato server in assenza di risposta AI valida.',
             schedule,
         },
         diet_plan: {
@@ -458,29 +806,129 @@ function mergeFoodRestrictionsIntoDietRules(
     };
 }
 
-async function requestPlanPart(prompt: string, label: string): Promise<PlanData> {
+function buildPlanPartMetrics(
+    label: string,
+    startedAtMs: number,
+    attempts: PlanPartAttemptMetrics[],
+    usedModel: string | null,
+    usedAttempt: number | null
+): PlanPartMetrics {
+    return {
+        label,
+        total_duration_ms: Date.now() - startedAtMs,
+        model_attempts: attempts,
+        used_model: usedModel,
+        used_attempt: usedAttempt,
+    };
+}
+
+function withTimeout<T>(operation: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+            reject(new Error(timeoutMessage));
+        }, timeoutMs);
+
+        operation
+            .then((result) => {
+                clearTimeout(timeoutId);
+                resolve(result);
+            })
+            .catch((error) => {
+                clearTimeout(timeoutId);
+                reject(error);
+            });
+    });
+}
+
+function resolveMaxTokensForLabel(label: string): number {
+    if (label === 'diet') return LLM_MAX_TOKENS_DIET;
+    if (label === 'workout') return LLM_MAX_TOKENS_WORKOUT;
+    return LLM_MAX_TOKENS;
+}
+
+function isRetryableLlmError(error: unknown): boolean {
+    const details = extractErrorDetails(error);
+
+    if (typeof details.status === 'number') {
+        if (details.status === 408 || details.status === 429) return true;
+        if (details.status >= 500) return true;
+    }
+
+    const normalizedMessage = normalizeForMatching(details.message);
+
+    return /\b(timeout|timed out|temporaneo|temporary|overload|rate limit|connection|network|socket|reset|json)\b/.test(normalizedMessage);
+}
+
+async function requestPlanPart(prompt: string, label: string): Promise<PlanPartResponse> {
     const client = getLlmClient();
     const generationModels = getGenerationModels();
+    const startedAtMs = Date.now();
+    const attempts: PlanPartAttemptMetrics[] = [];
     let lastError: unknown = null;
 
     for (const model of generationModels) {
-        for (let attempt = 1; attempt <= 2; attempt += 1) {
+        for (let attempt = 1; attempt <= LLM_MAX_ATTEMPTS; attempt += 1) {
+            const attemptStartedAtMs = Date.now();
+            const maxTokens = resolveMaxTokensForLabel(label);
+
             try {
-                const response = await client.chat.completions.create({
-                    model,
-                    messages: [{ role: 'system', content: prompt }],
-                    max_tokens: 5000,
-                });
+                const response = await withTimeout(
+                    client.chat.completions.create({
+                        model,
+                        messages: [
+                            { role: 'system', content: 'Rispondi solo con JSON valido. Nessun testo extra.' },
+                            { role: 'user', content: prompt },
+                        ],
+                        max_tokens: maxTokens,
+                    }),
+                    LLM_REQUEST_TIMEOUT_MS,
+                    `Timeout generazione ${label}:${model}:attempt${attempt}`
+                );
 
                 const content = response.choices[0]?.message?.content || '{}';
-                return parseAiJson(content, `${label}:${model}:attempt${attempt}`);
+                const parsed = parseAiJson(content, `${label}:${model}:attempt${attempt}`);
+
+                attempts.push({
+                    model,
+                    attempt,
+                    duration_ms: Date.now() - attemptStartedAtMs,
+                    success: true,
+                });
+
+                return {
+                    planData: parsed,
+                    metrics: buildPlanPartMetrics(label, startedAtMs, attempts, model, attempt),
+                };
             } catch (error) {
                 lastError = error;
+                const retryable = isRetryableLlmError(error);
+
+                attempts.push({
+                    model,
+                    attempt,
+                    duration_ms: Date.now() - attemptStartedAtMs,
+                    success: false,
+                    retryable,
+                    error_message: extractErrorDetails(error).message,
+                });
+
+                if (!retryable) {
+                    const nonRetryableMetrics = buildPlanPartMetrics(label, startedAtMs, attempts, null, null);
+                    const message = error instanceof Error && error.message
+                        ? error.message
+                        : `Errore non retryable su ${label}:${model}`;
+                    throw new PlanPartGenerationError(message, nonRetryableMetrics);
+                }
             }
         }
     }
 
-    throw lastError ?? new Error(`Impossibile generare la sezione ${label}`);
+    const metrics = buildPlanPartMetrics(label, startedAtMs, attempts, null, null);
+    const message = lastError instanceof Error && lastError.message
+        ? lastError.message
+        : `Impossibile generare la sezione ${label}`;
+
+    throw new PlanPartGenerationError(message, metrics);
 }
 
 function validateAndBuildCanonicalInput(body: unknown): CanonicalValidationResult {
@@ -652,6 +1100,7 @@ ${commonContext}
 
 REGOLE TASSATIVE:
 1. "diet_plan.weekly_schedule" DEVE contenere ESATTAMENTE 7 giorni (da Lunedì a Domenica), indicando per ogni pasto gli alimenti esatti con la quantità in g/ml. Esempio pasto: ["50g Avena", "200ml Latte"].
+1.1. Mantieni output compatto: massimo 2 alimenti per pasto, niente spiegazioni narrative.
 2. L'output deve essere SOLO E UNICAMENTE un JSON valido (privo di markdown addizionali come \`\`\`json).
 3. ${input.has_food_restrictions ? `ESCLUDI COMPLETAMENTE questi alimenti/condizioni: ${input.food_restrictions_notes}.` : 'Se non ci sono allergie dichiarate, mantieni il piano alimentare standard bilanciato.'}
 4. ${restrictionPromptHint}
@@ -710,13 +1159,13 @@ function buildSafePlanData(
     };
 }
 
-async function saveUserProfile(canonicalInput: CanonicalOnboardingInput, safePlanData: SafePlanData) {
+async function saveUserProfile(userId: string, canonicalInput: CanonicalOnboardingInput, safePlanData: SafePlanData) {
     const mongoClient = await clientPromise;
     const db = mongoClient.db(DATABASE_NAME);
     const userProfiles = db.collection<UserProfile>(COLLECTIONS.userProfiles);
 
     const userProfile = sanitizeLegacyProfileFields({
-        userId: PROTOTYPE_USER_ID,
+        userId,
         name: canonicalInput.name || 'Utente',
         ...safePlanData,
     });
@@ -728,7 +1177,7 @@ async function saveUserProfile(canonicalInput: CanonicalOnboardingInput, safePla
     };
 
     return userProfiles.findOneAndUpdate(
-        { userId: PROTOTYPE_USER_ID },
+        { userId },
         updatePayload,
         { upsert: true, returnDocument: 'after' }
     );
@@ -764,30 +1213,73 @@ function extractErrorDetails(error: unknown) {
 }
 
 export async function POST(req: Request) {
+    const requestId = randomUUID();
+    const requestStartedAtMs = Date.now();
+    const requestStartedAtIso = new Date(requestStartedAtMs).toISOString();
+    let bodyParseMs = 0;
+    let validationMs = 0;
+    let promptBuildMs = 0;
+    let llmParallelMs = 0;
+    let mergeSanitizeMs = 0;
+    let saveProfileMs = 0;
+
     try {
+        const bodyParseStartedAtMs = Date.now();
         const body = await req.json();
+        bodyParseMs = Date.now() - bodyParseStartedAtMs;
+
+        const cookieStore = await cookies();
+        const userIdFromCookie = cookieStore.get(USER_ID_COOKIE_NAME)?.value;
+        const userIdFromBody = isRecord(body) ? body.userId : undefined;
+        const activeUserId = resolveUserId(userIdFromBody, userIdFromCookie);
+
+        const validationStartedAtMs = Date.now();
         const validation = validateAndBuildCanonicalInput(body);
+        validationMs = Date.now() - validationStartedAtMs;
 
         if (!validation.ok) {
+            console.warn('[generate-plan] validation failed', {
+                request_id: requestId,
+                started_at: requestStartedAtIso,
+                body_parse_ms: bodyParseMs,
+                validation_ms: validationMs,
+                error: validation.error,
+            });
             return NextResponse.json({ error: validation.error }, { status: 400 });
         }
 
         const canonicalInput = validation.canonicalInput;
 
+        const promptBuildStartedAtMs = Date.now();
         const restrictionPromptHint = buildRestrictionPromptHint(canonicalInput);
         const commonContext = buildCommonContext(canonicalInput);
         const workoutPrompt = buildWorkoutPrompt(canonicalInput, commonContext);
         const dietPrompt = buildDietPrompt(canonicalInput, commonContext, restrictionPromptHint);
+        promptBuildMs = Date.now() - promptBuildStartedAtMs;
 
         const fallbackPlan = buildFallbackPlan(canonicalInput);
 
+        const llmParallelStartedAtMs = Date.now();
         const [workoutResult, dietResult] = await Promise.allSettled([
             requestPlanPart(workoutPrompt, 'workout'),
             requestPlanPart(dietPrompt, 'diet'),
         ]);
+        llmParallelMs = Date.now() - llmParallelStartedAtMs;
+
+        const workoutMetrics = workoutResult.status === 'fulfilled'
+            ? workoutResult.value.metrics
+            : workoutResult.reason instanceof PlanPartGenerationError
+                ? workoutResult.reason.metrics
+                : null;
+
+        const dietMetrics = dietResult.status === 'fulfilled'
+            ? dietResult.value.metrics
+            : dietResult.reason instanceof PlanPartGenerationError
+                ? dietResult.reason.metrics
+                : null;
 
         const workoutData: PlanData = workoutResult.status === 'fulfilled'
-            ? workoutResult.value
+            ? workoutResult.value.planData
             : {
                 personal_info: fallbackPlan.personal_info,
                 targets: fallbackPlan.targets,
@@ -795,20 +1287,29 @@ export async function POST(req: Request) {
             };
 
         const dietData: PlanData = dietResult.status === 'fulfilled'
-            ? dietResult.value
+            ? dietResult.value.planData
             : {
                 diet_plan: fallbackPlan.diet_plan,
                 diet_rules: fallbackPlan.diet_rules,
             };
 
         if (workoutResult.status === 'rejected') {
-            console.error('Workout generation fallback attivato:', workoutResult.reason);
+            console.error('Workout generation fallback attivato:', {
+                request_id: requestId,
+                reason: extractErrorDetails(workoutResult.reason),
+                metrics: workoutMetrics,
+            });
         }
 
         if (dietResult.status === 'rejected') {
-            console.error('Diet generation fallback attivato:', dietResult.reason);
+            console.error('Diet generation fallback attivato:', {
+                request_id: requestId,
+                reason: extractErrorDetails(dietResult.reason),
+                metrics: dietMetrics,
+            });
         }
 
+        const mergeSanitizeStartedAtMs = Date.now();
         // Uniamo le due risposte in un unico grande oggetto
         const planData = {
             ...fallbackPlan,
@@ -817,12 +1318,65 @@ export async function POST(req: Request) {
         };
 
         const safePlanData = buildSafePlanData(planData, fallbackPlan, canonicalInput);
-        const result = await saveUserProfile(canonicalInput, safePlanData);
+        mergeSanitizeMs = Date.now() - mergeSanitizeStartedAtMs;
 
-        return NextResponse.json({ success: true, profile: result });
+        const saveProfileStartedAtMs = Date.now();
+        const result = await saveUserProfile(activeUserId, canonicalInput, safePlanData);
+        saveProfileMs = Date.now() - saveProfileStartedAtMs;
+
+        const generationMetrics: GeneratePlanMetrics = {
+            request_id: requestId,
+            started_at: requestStartedAtIso,
+            total_duration_ms: Date.now() - requestStartedAtMs,
+            body_parse_ms: bodyParseMs,
+            validation_ms: validationMs,
+            prompt_build_ms: promptBuildMs,
+            llm_parallel_ms: llmParallelMs,
+            merge_sanitize_ms: mergeSanitizeMs,
+            save_profile_ms: saveProfileMs,
+            fallback_workout: workoutResult.status === 'rejected',
+            fallback_diet: dietResult.status === 'rejected',
+            workout: workoutMetrics,
+            diet: dietMetrics,
+        };
+
+        console.info('[generate-plan] completed', generationMetrics);
+
+        const generationOutcome = {
+            fallback_workout: workoutResult.status === 'rejected',
+            fallback_diet: dietResult.status === 'rejected',
+        };
+
+        const response = NextResponse.json({ success: true, profile: result, generation: generationOutcome });
+        response.cookies.set(USER_ID_COOKIE_NAME, activeUserId, {
+            path: '/',
+            sameSite: 'lax',
+            maxAge: 60 * 60 * 24 * 365,
+        });
+        return response;
     } catch (error: unknown) {
-        console.error("Errore Gen AI:", error);
+        const generationMetrics: GeneratePlanMetrics = {
+            request_id: requestId,
+            started_at: requestStartedAtIso,
+            total_duration_ms: Date.now() - requestStartedAtMs,
+            body_parse_ms: bodyParseMs,
+            validation_ms: validationMs,
+            prompt_build_ms: promptBuildMs,
+            llm_parallel_ms: llmParallelMs,
+            merge_sanitize_ms: mergeSanitizeMs,
+            save_profile_ms: saveProfileMs,
+            fallback_workout: false,
+            fallback_diet: false,
+            workout: null,
+            diet: null,
+        };
+
         const details = extractErrorDetails(error);
+        console.error('Errore Gen AI:', {
+            request_id: requestId,
+            details,
+            metrics: generationMetrics,
+        });
         return NextResponse.json(
             {
                 error: 'Errore durante la generazione del piano con IA',

@@ -3,8 +3,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { User, Flame, Dumbbell } from 'lucide-react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { PROTOTYPE_USER_ID } from '@/lib/config/user';
-import { headers } from 'next/headers';
+import { USER_ID_COOKIE_NAME, resolveUserId } from '@/lib/config/user';
+import { cookies, headers } from 'next/headers';
 import { extractApiError, readJsonResponse } from '@/lib/utils';
 
 export const revalidate = 0;
@@ -61,9 +61,11 @@ async function fetchProfileViaApi(userId: string): Promise<UserProfile | null> {
 
 export default async function Profile() {
     let userProfile: UserProfile | null = null;
+    const cookieStore = await cookies();
+    const activeUserId = resolveUserId(cookieStore.get(USER_ID_COOKIE_NAME)?.value);
 
     try {
-        userProfile = await fetchProfileViaApi(PROTOTYPE_USER_ID);
+        userProfile = await fetchProfileViaApi(activeUserId);
     } catch (error) {
         console.error('Errore caricamento profilo via API:', error);
     }

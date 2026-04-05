@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useState, useEffect } from "react";
+import { useCallback, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { PieChart, Pie, Cell } from "recharts";
 import { Plus, Droplets, Trash2, Loader2, Pencil, CalendarDays } from "lucide-react";
@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { PROTOTYPE_USER_ID } from "@/lib/config/user";
+import { PROTOTYPE_USER_ID, USER_ID_COOKIE_NAME, USER_ID_STORAGE_KEY, resolveUserId } from "@/lib/config/user";
 import { extractApiError, getTodayDate, readJsonResponse } from "@/lib/utils";
 import type { DailyLog, Meal } from "@/lib/types/database";
 
@@ -28,9 +28,9 @@ const MEAL_SECTIONS: Array<{ type: MealType; title: string; helper: string }> = 
   { type: 'snack', title: 'Snack', helper: 'Spuntini strategici tra i pasti principali.' },
 ];
 
-function createEmptyDailyLog(): DailyLog {
+function createEmptyDailyLog(userId: string): DailyLog {
   return {
-    userId: PROTOTYPE_USER_ID,
+    userId,
     date: getTodayDate(),
     metrics: {},
     meals_log: [],
@@ -63,6 +63,35 @@ function isProfileApiResponse(value: unknown): value is ProfileApiResponse {
   return !!value && typeof value === 'object' && 'targets' in value;
 }
 
+function readCookieValue(name: string): string | null {
+  if (typeof document === 'undefined') return null;
+
+  const normalizedCookie = document.cookie
+    .split(';')
+    .map((item) => item.trim())
+    .find((item) => item.startsWith(`${name}=`));
+
+  if (!normalizedCookie) return null;
+
+  const [, value] = normalizedCookie.split('=', 2);
+  if (!value) return null;
+
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function resolveClientUserId(): string {
+  if (typeof window === 'undefined') return PROTOTYPE_USER_ID;
+
+  const userIdFromStorage = window.localStorage.getItem(USER_ID_STORAGE_KEY);
+  const userIdFromCookie = readCookieValue(USER_ID_COOKIE_NAME);
+
+  return resolveUserId(userIdFromStorage, userIdFromCookie, PROTOTYPE_USER_ID);
+}
+
 async function postLogAction(payload: Record<string, unknown>) {
   const response = await fetch('/api/logs', {
     method: 'POST',
@@ -79,19 +108,21 @@ async function postLogAction(payload: Record<string, unknown>) {
 
 export default function Diary() {
   const router = useRouter();
+  const [activeUserId, setActiveUserId] = useState(PROTOTYPE_USER_ID);
+  const [isUserIdReady, setIsUserIdReady] = useState(false);
   const [log, setLog] = useState<DailyLog | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isChartMounted, setIsChartMounted] = useState(false);
   const [waterGlasses, setWaterGlasses] = useState(0);
   const [dailyCalorieGoal, setDailyCalorieGoal] = useState(DEFAULT_DAILY_CALORIE_GOAL);
 
-  const fetchTodayData = async () => {
+  const fetchTodayData = useCallback(async () => {
     setIsLoading(true);
     try {
       const today = getTodayDate();
       const [res, profileRes] = await Promise.all([
-        fetch('/api/logs?userId=' + PROTOTYPE_USER_ID + '&date=' + today),
-        fetch('/api/profile?userId=' + PROTOTYPE_USER_ID)
+        fetch('/api/logs?userId=' + activeUserId + '&date=' + today),
+        fetch('/api/profile?userId=' + activeUserId)
       ]);
 
       const [data, profileData] = await Promise.all([
@@ -122,28 +153,38 @@ export default function Diary() {
         setLog(data);
         setWaterGlasses(Math.floor((data.daily_nutrition_summary.water_intake_ml || 0) / 250));
       } else {
-        setLog(createEmptyDailyLog());
+        setLog(createEmptyDailyLog(activeUserId));
       }
     } catch (e) {
       console.error(e);
     }
     setIsLoading(false);
-  };
+  }, [activeUserId]);
 
   useEffect(() => {
+    setActiveUserId(resolveClientUserId());
+    setIsUserIdReady(true);
+
     const chartTimer = setTimeout(() => {
       setIsChartMounted(true);
     }, 0);
+
+    return () => {
+      clearTimeout(chartTimer);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isUserIdReady) return;
 
     const dataTimer = setTimeout(() => {
       void fetchTodayData();
     }, 0);
 
     return () => {
-      clearTimeout(chartTimer);
       clearTimeout(dataTimer);
     };
-  }, []);
+  }, [activeUserId, fetchTodayData, isUserIdReady]);
 
   const openAddDialog = (type: MealType) => {
     router.push(`/diary/search?meal_type=${encodeURIComponent(type)}`);
@@ -193,7 +234,7 @@ export default function Diary() {
       const updatedMeal = { ...editingMeal, ...editMacros };
       const today = getTodayDate();
       await postLogAction({
-        userId: PROTOTYPE_USER_ID,
+        userId: activeUserId,
         date: today,
         action: 'edit_meal',
         meal: updatedMeal,
@@ -211,7 +252,7 @@ export default function Diary() {
     try {
       const today = getTodayDate();
       await postLogAction({
-        userId: PROTOTYPE_USER_ID,
+        userId: activeUserId,
         date: today,
         action: 'delete_meal',
         meal: mealToDelete
@@ -232,7 +273,7 @@ export default function Diary() {
     try {
       const today = getTodayDate();
       await postLogAction({
-        userId: PROTOTYPE_USER_ID,
+        userId: activeUserId,
         date: today,
         action: 'update_water',
         water_ml: nextWaterMl,
